@@ -6,6 +6,8 @@ quiet and executes later.** This tells you when.
 Plus **TagRail**: a merchant checkout on Flare's own minting tags, and an
 executor bot that survives the delay rules.
 
+Live dashboard: **https://undelayed.vercel.app**
+
 ```
 npm install
 npm test                              # 15 cases, including parity with the real contract

@@ -25,7 +25,8 @@ finalise those payments.
 _(record before submitting — see DEMO_SCRIPT.md)_
 
 **6. GitHub repo**
-_(publish before submitting)_
+https://github.com/PugarHuda/undelayed
+Live dashboard: https://undelayed.vercel.app
 
 **7. How it uses Flare**
 FAssets direct minting (`executeDirectMinting` with `IXRPPayment.Proof`, delay

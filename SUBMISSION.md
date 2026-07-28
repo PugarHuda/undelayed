@@ -2,6 +2,8 @@
 
 **Bounty:** Interoperable Assets (Bounty 1)
 **One line:** A merchant rail for FXRP direct minting, plus the only tool that tells you when a direct minting will actually execute.
+**Code:** https://github.com/PugarHuda/undelayed
+**Dashboard:** https://undelayed.vercel.app
 
 ---
 
