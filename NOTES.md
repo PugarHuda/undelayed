@@ -68,11 +68,47 @@ pulled off the DA layer, response decoded.
 `_decodeTarget`: a registered destination tag wins and the memo is ignored;
 otherwise a 32-byte memo holding a `DIRECT_MINTING` payment reference is decoded
 into the recipient address. A registered tag also carries its `allowedExecutor`,
-and `othersCanExecuteAfterSeconds` (600s on Coston2) is how long that
-exclusivity lasts before anyone may execute.
+and `getDirectMintingOthersCanExecuteAfterSeconds()` is how long that
+exclusivity lasts before anyone may execute. **It reads 7200s on both Coston2
+and Flare today** — we had 600 written down from an earlier reading, which is
+exactly why the bot reads it live instead of holding a constant.
 
 This is the whole of TagRail: reserve a tag, point it at the merchant, point its
 executor at the bot. No new Solidity.
+
+## What the merchant actually receives
+
+`_computeFees` (`DirectMintingFacet.sol`), read off the verified facet at
+`0x4aFaEda2AC4442cD10Ac601622Eee0dF5DF78eeF`:
+
+```
+relativeFee = mulBips(received, feeBIPS)                    // floors
+mintingFee  = min(max(relativeFee, minimumFee), received)
+executorFee = min(executorFee, received - mintingFee)       // system fee wins
+merchant    = received - mintingFee - executorFee
+```
+
+| | Coston2 | Flare |
+|---|---|---|
+| `getDirectMintingFeeBIPS` | 25 (0.25%) | 10 (0.10%) |
+| `getDirectMintingMinimumFeeUBA` | 0.1 XRP | 0.1 XRP |
+| `getDirectMintingExecutorFeeUBA` | 0.1 XRP | 0.2 XRP |
+| `getDirectMintingFeeReceiver` | `0xDcDD7547…Cb01B` | `0xF55bcAd5…551C7` |
+
+Three consequences a checkout has to handle:
+
+1. **The system fee is a floor before it is a percentage.** Below 40 XRP on
+   Coston2 it is a flat 0.1; above, it is 0.25%. A merchant who invoices the
+   sticker price is underpaid on every sale, and by a different amount each time.
+   `src/fees.ts` inverts it: ask for the amount that *nets* the price.
+2. **A payment below the minimum fee mints nothing** (`_paymentTooSmall`). The
+   XRP is gone and no FXRP appears.
+3. **Between the two fees, the executor is the one who goes short** — the system
+   fee is taken first, so on a 0.15 XRP payment the executor earns 0.05, not 0.1.
+   An executor pricing its own work off the setting is wrong on small payments.
+
+Verified against the receipt of `0x595a419c…5e0f`: three mints, 0.1 to the fee
+receiver, 6.8 to the merchant, 0.1 to the executor, on 7 XRP in.
 
 ### Proven on Coston2
 
@@ -95,9 +131,12 @@ inside the exclusive window: `0x595a419c…5e0f` minted **0.1 FXRP system fee,
 6.8 to the merchant, 0.1 executor fee to the bot** — 7 XRP split exactly as
 `_computeFees` computes it.
 
-The exclusive window is `othersCanExecuteAfterSeconds` (600s on Coston2) measured
-from the *payment's* underlying timestamp, not from when you noticed it. An
-executor that takes longer than that to get a proof has no exclusivity left.
+The exclusive window is `othersCanExecuteAfterSeconds` measured from the
+*payment's* underlying timestamp, not from when you noticed it. An executor that
+takes longer than that to get a proof has no exclusivity left — and conversely, a
+payment whose own executor never shows up becomes anyone's after the window, so a
+bot that skips other people's tags outright leaves merchants unpaid for no
+reason. `src/bot.ts` waits instead of skipping.
 
 ## Window sizes
 

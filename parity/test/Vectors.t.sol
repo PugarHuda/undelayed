@@ -54,6 +54,51 @@ contract VectorsTest is Test {
     uint64 constant DAY = 86400;
     uint64 constant M = 1_000_000; // 1 XRP in AMG, granularity 1
 
+    // --- randomised sequences -------------------------------------------------
+    //
+    // The scenarios below the constants are ones I thought of, which is exactly
+    // their weakness. A random walk exercises sequences nobody chose: repeated
+    // overspend, jumps of several windows, amounts that straddle the limit by one
+    // unit. The seeds are fixed, so a failure is reproducible and the committed
+    // vectors are reviewable — this is differential testing, not fuzzing, because
+    // forge resets state between fuzz runs and the walk needs the state to carry.
+
+    uint256 internal rng;
+
+    function _rand(uint256 bound) internal returns (uint256) {
+        rng = uint256(keccak256(abi.encode(rng)));
+        return bound == 0 ? 0 : rng % bound;
+    }
+
+    function _walk(string memory seed, uint256 steps) internal {
+        rng = uint256(keccak256(bytes(seed)));
+        uint64 windowSize = _rand(2) == 0 ? HOUR : DAY;
+        uint64 maxPerWindow = uint64((1 + _rand(200_000)) * uint256(M));
+        uint64 at = uint64(1_700_000_000 + _rand(1_000_000));
+        _reset(windowSize, maxPerWindow, at);
+
+        for (uint256 i = 0; i < steps; i++) {
+            // mostly small hops inside the window; every so often a jump over
+            // several whole windows, which is where the carry-over rule bites
+            at += uint64(_rand(4) == 0 ? _rand(5) * uint256(windowSize) + 1 : _rand(windowSize));
+            // Amount scale is drawn per step. A flat 0..3x draw looks thorough
+            // and is not: debt carries, so after one overspend every later step
+            // is delayed and the not-delayed branch stops being exercised.
+            uint256 max = uint256(maxPerWindow);
+            uint256 bucket = _rand(4);
+            uint64 amount = uint64(
+                bucket == 0
+                    ? _rand(max / 8 + 1) // dust
+                    : bucket == 1
+                        ? _rand(max + 1) // anywhere up to the limit
+                        : bucket == 2
+                            ? max - _rand(3) // within a unit or two of the edge
+                            : _rand(3 * max + 1) // several times over
+            );
+            _step(windowSize, maxPerWindow, at, amount);
+        }
+    }
+
     function test_writeVectors() public {
         uint64 t0 = 1785000000; // aligned to neither window on purpose
 
@@ -98,7 +143,14 @@ contract VectorsTest is Test {
         _step(HOUR, 100 * M, t0 + 1, 0);
         _step(HOUR, 100 * M, t0 + 2, 1);
 
+        // 9. sequences nobody chose
+        _walk("undelayed/walk/1", 40);
+        _walk("undelayed/walk/2", 40);
+        _walk("undelayed/walk/3", 40);
+        _walk("undelayed/walk/4", 40);
+        _walk("undelayed/walk/5", 40);
+
         vm.writeFile("./out-vectors/vectors.json", string.concat("[", json, "]"));
-        assertGt(count, 10, "expected a useful number of vectors");
+        assertGt(count, 200, "expected a useful number of vectors");
     }
 }

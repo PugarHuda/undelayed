@@ -105,6 +105,20 @@
   </div>
 
   <div class="rule"></div>
+  <div class="label">Merchant checkout — what to actually invoice</div>
+  <form id="inv" autocomplete="off">
+    <input id="usd" inputmode="decimal" value="25" aria-label="Price in USD">
+    <button class="go" type="submit">Price it</button>
+  </form>
+  <div class="scroll">
+    <table id="invoice">
+      <thead><tr><th>Line</th><th>XRP</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="note" id="inv-note"></p>
+
+  <div class="rule"></div>
   <div class="label">Why the raw getters mislead</div>
   <p class="note">
     The limiter is not a tumbling window. Each elapsed window subtracts one whole
@@ -122,6 +136,7 @@
 import { createPublicClient, http, parseAbi } from "https://esm.sh/viem@2.21.55";
 import { advance, predict, undelayedCapacity } from "./limiter.js";
 import { comparePlans } from "./plan.js";
+import { fees, invoice, usdToUba } from "./fees.js";
 
 const NETS = {
   coston2: { rpc: "https://coston2-api.flare.network/ext/C/rpc", explorer: "https://coston2-explorer.flare.network" },
@@ -138,6 +153,9 @@ const AM_ABI = parseAbi([
   "function getDirectMintingHourlyLimiterState() view returns (uint64,uint64)",
   "function getDirectMintingDailyLimiterState() view returns (uint64,uint64)",
   "function directMintingPaymentAddress() view returns (string)",
+  "function getDirectMintingFeeBIPS() view returns (uint256)",
+  "function getDirectMintingMinimumFeeUBA() view returns (uint256)",
+  "function getDirectMintingExecutorFeeUBA() view returns (uint256)",
 ]);
 const FTSO_ABI = parseAbi(["function getFeedById(bytes21) view returns (uint256,int8,uint64)"]);
 const XRP_USD = "0x015852502f55534400000000000000000000000000";
@@ -162,12 +180,15 @@ async function load(network) {
   });
   const block = await pc.getBlock();
   const read = (fn) => pc.readContract({ address: assetManager, abi: AM_ABI, functionName: fn, blockNumber: block.number });
-  const [g, hLimit, dLimit, largeUba, largeDelay, hState, dState, vault] = await Promise.all([
-    read("assetMintingGranularityUBA"), read("getDirectMintingHourlyLimitUBA"),
-    read("getDirectMintingDailyLimitUBA"), read("getDirectMintingLargeMintingThresholdUBA"),
-    read("getDirectMintingLargeMintingDelaySeconds"), read("getDirectMintingHourlyLimiterState"),
-    read("getDirectMintingDailyLimiterState"), read("directMintingPaymentAddress"),
-  ]);
+  const [g, hLimit, dLimit, largeUba, largeDelay, hState, dState, vault, feeBips, minFee, execFee] =
+    await Promise.all([
+      read("assetMintingGranularityUBA"), read("getDirectMintingHourlyLimitUBA"),
+      read("getDirectMintingDailyLimitUBA"), read("getDirectMintingLargeMintingThresholdUBA"),
+      read("getDirectMintingLargeMintingDelaySeconds"), read("getDirectMintingHourlyLimiterState"),
+      read("getDirectMintingDailyLimiterState"), read("directMintingPaymentAddress"),
+      read("getDirectMintingFeeBIPS"), read("getDirectMintingMinimumFeeUBA"),
+      read("getDirectMintingExecutorFeeUBA"),
+    ]);
   let priceUsd = null;
   try {
     const ftso = await pc.readContract({ address: REGISTRY, abi: REG_ABI, functionName: "getContractAddressByName", args: ["FtsoV2"] });
@@ -177,6 +198,7 @@ async function load(network) {
 
   return {
     assetManager, granularityUba: g, coreVaultAddress: vault, now: block.timestamp, priceUsd,
+    fees: { feeBips, minimumFeeUba: minFee, executorFeeUba: execFee },
     hourly: { windowSizeSeconds: 3600n, maxPerWindow: hLimit / g, windowStart: BigInt(hState[0]), minted: BigInt(hState[1]) },
     daily:  { windowSizeSeconds: 86400n, maxPerWindow: dLimit / g, windowStart: BigInt(dState[0]), minted: BigInt(dState[1]) },
     largeThresholdAmg: largeUba / g, largeDelaySeconds: largeDelay,
@@ -216,6 +238,7 @@ function render() {
     ` · core vault <code>${snap.coreVaultAddress}</code>` +
     ` · chain time ${new Date(Number(snap.now) * 1000).toISOString().slice(0, 19).replace("T", " ")} UTC`;
   simulate();
+  priceIt();
 }
 
 function simulate() {
@@ -248,6 +271,41 @@ function simulate() {
     : `But the tail then lands ${dur(c.split.lastAt - c.single.lastAt)} later than one payment — a large minting consumes no window quota, so forcing it through the limiter can cost more than the flat delay. Splitting is not free here.`;
 }
 
+/**
+ * The merchant's side. A payment arrives net of a system fee and an executor
+ * fee, so invoicing the sticker price underpays the merchant every time — and by
+ * a different amount above and below the point where the percentage overtakes
+ * the flat minimum.
+ */
+function priceIt() {
+  const usd = Number($("usd").value);
+  const body = $("invoice").querySelector("tbody");
+  if (!Number.isFinite(usd) || usd <= 0) return;
+  if (!snap.priceUsd) {
+    body.innerHTML = "";
+    $("inv-note").textContent = "No XRP/USD feed on this network right now, so there is no honest price to show.";
+    return;
+  }
+  const g = snap.granularityUba;
+  const want = usdToUba(usd, snap.priceUsd, g);
+  const b = invoice(want, snap.fees);
+  const naive = fees(want, snap.fees); // what a merchant who invoices the sticker gets
+  const short = want - naive.netUba;
+
+  body.innerHTML = [
+    ["Customer sends", b.paidUba, ""],
+    ["System fee", -b.mintingFeeUba, b.mintingFeeUba === snap.fees.minimumFeeUba ? "the minimum, not the percentage" : `${Number(snap.fees.feeBips) / 100}%`],
+    ["Executor fee", -b.executorFeeUba, "paid to whoever finalises it"],
+    ["Merchant receives", b.netUba, `$${(Number(b.netUba) / 1e6 * snap.priceUsd).toFixed(2)}`],
+  ].map(([k, v, note]) => `<tr><td>${k}</td><td>${v < 0n ? "−" : ""}${fmt(v < 0n ? -v : v)}</td><td style="color:var(--dim)">${note}</td></tr>`).join("");
+
+  const p = predict(snap, b.paidUba / g, snap.now);
+  $("inv-note").textContent =
+    `Invoice the sticker price instead — ${fmt(want)} XRP — and the merchant is credited ${fmt(naive.netUba)}, ` +
+    `short by ${fmt(short)} XRP on every sale. ` +
+    (p.delayed ? `This payment would also be delayed ${dur(p.allowedAt - snap.now)} by the ${p.reason} rule.` : `This one executes immediately.`);
+}
+
 async function switchTo(network) {
   net = network;
   for (const b of $("nets").children) b.setAttribute("aria-pressed", String(b.dataset.net === network));
@@ -262,6 +320,8 @@ $("nets").addEventListener("click", (e) => {
 });
 $("sim").addEventListener("submit", (e) => { e.preventDefault(); simulate(); });
 $("amount").addEventListener("input", () => snap && simulate());
+$("inv").addEventListener("submit", (e) => { e.preventDefault(); priceIt(); });
+$("usd").addEventListener("input", () => snap && priceIt());
 
 await switchTo("coston2");
 setInterval(() => switchTo(net), 30_000);

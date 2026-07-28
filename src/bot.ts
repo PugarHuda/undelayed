@@ -20,6 +20,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { client, readLimits, NETWORKS, type Network } from "./chain.js";
 import { prepareRequest, submitRequest, fetchProof } from "./fdc.js";
 import { predict } from "./limiter.js";
+import { fees } from "./fees.js";
 
 const XRPL_RPC = {
   coston2: "https://s.altnet.rippletest.net:51234/",
@@ -37,7 +38,16 @@ const wantedTags = arg("tags")?.split(",").map((t) => BigInt(t.trim()));
 
 const STATE_FILE = fileURLToPath(new URL(`../bot-state.${network}.json`, import.meta.url));
 
-type Entry = { request?: `0x${string}`; votingRound?: number; done?: boolean; allowedAt?: number };
+type Entry = {
+  request?: `0x${string}`;
+  votingRound?: number;
+  done?: boolean;
+  allowedAt?: number;
+  /** How this one ended, so `--report` can price the strategy rather than guess. */
+  outcome?: "won" | "lost";
+  feeUba?: string;
+  tag?: string;
+};
 const state: Record<string, Entry> = existsSync(STATE_FILE)
   ? JSON.parse(readFileSync(STATE_FILE, "utf8"))
   : {};
@@ -58,6 +68,9 @@ const TAG_ABI = parseAbi([
 ]);
 
 const ZERO = "0x0000000000000000000000000000000000000000";
+
+/** XRPL timestamps count from 2000-01-01, not 1970. */
+const RIPPLE_EPOCH = 946_684_800n;
 
 async function coreVaultPayments(coreVault: string) {
   const res = await fetch(XRPL_RPC[network as keyof typeof XRPL_RPC], {
@@ -106,7 +119,21 @@ async function tick() {
       pc.readContract({ address: snap.mintingTagManager, abi: TAG_ABI, functionName: "allowedExecutor", args: [tag] }),
     ]);
     if (recipient === ZERO) continue; // unregistered tag, not ours to serve
-    if (executor !== ZERO && executor.toLowerCase() !== account.address.toLowerCase()) continue;
+
+    // A tag's allowedExecutor is exclusive for othersCanExecuteAfterSeconds,
+    // measured from the payment's own underlying timestamp — not from when we
+    // noticed it. After that the rail is permissionless again, so this is a
+    // wait, not a skip: dropping the payment entirely would leave a merchant
+    // unpaid whenever their own executor went down.
+    if (executor !== ZERO && executor.toLowerCase() !== account.address.toLowerCase()) {
+      const paidAt = BigInt(p.tx.date ?? 0) + RIPPLE_EPOCH;
+      const opensAt = paidAt + snap.othersCanExecuteAfterSeconds;
+      if (snap.now < opensAt) {
+        console.log(`  ${txId.slice(0, 12)} tag ${tag}: reserved for ${executor.slice(0, 10)} for another ${opensAt - snap.now}s`);
+        continue;
+      }
+      console.log(`  ${txId.slice(0, 12)} tag ${tag}: exclusivity expired, anyone may execute`);
+    }
 
     // On-chain truth about an earlier attempt beats anything cached locally.
     const [delayState, allowedAt] = (await pc.readContract({
@@ -156,7 +183,7 @@ async function tick() {
       // merchant still received the FXRP; we just lost the fee and the proof we
       // paid for. Retrying can never succeed, so stop tracking it.
       if (reason.includes("0x18dce79f")) {
-        state[txId] = { ...entry, done: true };
+        state[txId] = { ...entry, done: true, outcome: "lost", tag: String(tag) };
         save();
         console.log(`  ${txId.slice(0, 12)} tag ${tag}: another executor won the race — minted already, fee lost`);
         continue;
@@ -171,12 +198,51 @@ async function tick() {
       args: [proof as any],
     });
     await pc.waitForTransactionReceipt({ hash });
-    state[txId] = { ...entry, done: true };
+    // What we actually earned is not the executor fee setting: on a payment
+    // small enough that the system fee eats most of it, the executor is the one
+    // who goes short.
+    const split = fees(amount, snap.fees);
+    state[txId] = { ...entry, done: true, outcome: "won", feeUba: String(split.executorFeeUba), tag: String(tag) };
     save();
-    const feeXrp = Number(snap.executorFeeUba) / 1e6; // bigint division would floor 0.1 to 0
-    console.log(`  ${txId.slice(0, 12)} tag ${tag}: minted to ${recipient}, executor fee ${feeXrp} XRP — ${hash}`);
+    const xrp = (uba: bigint) => Number(uba) / 1e6; // bigint division would floor 0.1 to 0
+    console.log(
+      `  ${txId.slice(0, 12)} tag ${tag}: ${xrp(split.netUba)} FXRP to ${recipient}, ` +
+        `${xrp(split.mintingFeeUba)} system fee, ${xrp(split.executorFeeUba)} to us — ${hash}`,
+    );
   }
 }
 
-await tick();
-if (!once) setInterval(() => tick().catch((e) => console.error(e.message)), 20_000);
+/**
+ * The executor's own books. Racing is not free — every attempt costs an FDC
+ * proof and gas whether or not it lands, so "we won one" is not the same as
+ * "this is worth running".
+ */
+function report() {
+  const rows = Object.entries(state);
+  const won = rows.filter(([, e]) => e.outcome === "won");
+  const lost = rows.filter(([, e]) => e.outcome === "lost");
+  const pending = rows.filter(([, e]) => !e.done);
+  // Entries finished before the bot started labelling outcomes. Counting them
+  // as neither is honest; counting them as wins would not be.
+  const unlabelled = rows.filter(([, e]) => e.done && !e.outcome);
+  const earned = won.reduce((a, [, e]) => a + BigInt(e.feeUba ?? 0), 0n);
+
+  console.log(`\n  executor report — ${network}`);
+  console.log(`  won      ${won.length}`);
+  console.log(`  lost     ${lost.length}   (proof and gas paid, fee to someone else)`);
+  console.log(`  pending  ${pending.length}`);
+  if (unlabelled.length) console.log(`  unknown  ${unlabelled.length}   (finished before outcomes were recorded)`);
+  console.log(`  earned   ${Number(earned) / 1e6} XRP in executor fees`);
+  if (won.length + lost.length > 0) {
+    const rate = (100 * won.length) / (won.length + lost.length);
+    console.log(`  win rate ${rate.toFixed(0)}%`);
+  }
+  console.log();
+}
+
+if (ARGS.includes("--report")) {
+  report();
+} else {
+  await tick();
+  if (!once) setInterval(() => tick().catch((e) => console.error(e.message)), 20_000);
+}

@@ -7,6 +7,7 @@ import {
   undelayedCapacity,
   type Limits,
 } from "./limiter.js";
+import type { FeeConfig } from "./fees.js";
 
 /** Flare's ContractRegistry, same address on every Flare network. */
 const REGISTRY = "0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019" as const;
@@ -24,9 +25,19 @@ const ASSET_MANAGER_ABI = parseAbi([
   "function getDirectMintingHourlyLimiterState() view returns (uint64,uint64)",
   "function getDirectMintingDailyLimiterState() view returns (uint64,uint64)",
   "function getDirectMintingExecutorFeeUBA() view returns (uint256)",
+  "function getDirectMintingFeeBIPS() view returns (uint256)",
+  "function getDirectMintingMinimumFeeUBA() view returns (uint256)",
+  "function getDirectMintingOthersCanExecuteAfterSeconds() view returns (uint256)",
   "function directMintingPaymentAddress() view returns (string)",
   "function getMintingTagManager() view returns (address)",
 ]);
+
+const FTSO_ABI = parseAbi([
+  "function getFeedById(bytes21) view returns (uint256,int8,uint64)",
+]);
+
+/** FTSO v2 feed id for XRP/USD. */
+const XRP_USD_FEED = "0x015852502f55534400000000000000000000000000" as const;
 
 // The window sizes are fixed at initialization and never exposed by a getter,
 // so they are named constants here. readLimits asserts the on-chain window
@@ -59,6 +70,13 @@ export type Snapshot = Limits & {
   mintingTagManager: `0x${string}`;
   granularityUba: bigint;
   executorFeeUba: bigint;
+  /** What the facet takes out of a payment before the merchant is credited. */
+  fees: FeeConfig;
+  /**
+   * How long a tag's `allowedExecutor` keeps exclusivity, measured from the
+   * payment's own underlying timestamp — not from when the executor noticed it.
+   */
+  othersCanExecuteAfterSeconds: bigint;
   coreVaultAddress: string;
   now: bigint;
 };
@@ -96,6 +114,9 @@ export async function readLimits(
     executorFeeUba,
     coreVaultAddress,
     mintingTagManager,
+    feeBips,
+    minimumFeeUba,
+    othersCanExecuteAfterSeconds,
   ] = (await Promise.all([
     call("assetMintingGranularityUBA"),
     call("getDirectMintingHourlyLimitUBA"),
@@ -107,6 +128,9 @@ export async function readLimits(
     call("getDirectMintingExecutorFeeUBA"),
     call("directMintingPaymentAddress"),
     call("getMintingTagManager"),
+    call("getDirectMintingFeeBIPS"),
+    call("getDirectMintingMinimumFeeUBA"),
+    call("getDirectMintingOthersCanExecuteAfterSeconds"),
   ])) as any[];
 
   // The limiter state getters return raw AMG while the limit getters convert to
@@ -141,9 +165,36 @@ export async function readLimits(
     mintingTagManager,
     granularityUba,
     executorFeeUba,
+    fees: { feeBips, minimumFeeUba, executorFeeUba },
+    othersCanExecuteAfterSeconds,
     coreVaultAddress,
     now: block.timestamp,
   };
+}
+
+/**
+ * XRP/USD from the FTSO, as a plain number. Returns null when the feed is not
+ * reachable — a checkout that cannot price is a checkout that must not guess.
+ */
+export async function xrpUsd(network: Network): Promise<number | null> {
+  const pc = client(network);
+  try {
+    const ftso = await pc.readContract({
+      address: REGISTRY,
+      abi: REGISTRY_ABI,
+      functionName: "getContractAddressByName",
+      args: ["FtsoV2"],
+    });
+    const [value, decimals] = (await pc.readContract({
+      address: ftso,
+      abi: FTSO_ABI,
+      functionName: "getFeedById",
+      args: [XRP_USD_FEED],
+    })) as [bigint, number, bigint];
+    return Number(value) / 10 ** Number(decimals);
+  } catch {
+    return null;
+  }
 }
 
 /** "If I mint X XRP right now, when is execution allowed?" */

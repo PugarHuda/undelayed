@@ -20,3 +20,6 @@ qa/shots/
 .env
 .env.*
 !.env.example
+
+# throwaway chain probes
+qa/tmp/

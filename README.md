@@ -28,9 +28,33 @@ npm run parity     # regenerate the vectors from the Solidity (needs forge)
 npm test           # check the TypeScript against them
 ```
 
-Changing `<` to `<=` in one comparison in `limiter.ts` fails it immediately. If
-Flare changes the limiter, this breaks instead of the product quietly
-mispredicting.
+217 vectors: 17 scenarios chosen by hand, 200 from deterministic random walks,
+because hand-chosen cases only cover cases someone thought of. Seven mutations of
+`limiter.ts` were tried against them and six died; the survivor is provably
+equivalent. Details and the mutation table are in `parity/README.md`. If Flare
+changes the limiter, this breaks instead of the product quietly mispredicting.
+
+## What the merchant actually receives
+
+A payment does not arrive intact, and the gap is not a flat percentage:
+
+```
+npm run pay -- 205 --usd 25 --quote
+
+  invoice     $25 at 1.062743 USD/XRP = 23.524032 XRP to the merchant
+  send        23.724032 XRP
+   ├ system fee   0.1  (the minimum, not the percentage)
+   ├ executor fee 0.1
+   └ merchant     23.524032 FXRP
+  execution   allowed immediately
+```
+
+`_computeFees` takes `max(0.25% , 0.1 XRP)` for the system and then the executor
+fee out of what is left, so below 40 XRP on Coston2 the system fee is flat and
+above it is a percentage. A merchant who invoices the sticker price is underpaid
+on every sale. `src/fees.ts` inverts the formula and gives the smallest payment
+that nets the price — checked by a test that also proves one drop less is not
+enough.
 
 ```
   hourly limit   100,000 XRP   on-chain reads         1 used   actually  0 used   <- window rolled 4h 1m ago
@@ -81,11 +105,12 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/cli.ts` | `npm run probe` — capacity and the simulator. |
 | `src/fdc.ts` | The FDC round trip: prepare, request, wait for the round, pull the proof. |
 | `src/prove.ts` | `npm run prove -- <xrplTxHash>` — dry run one payment end to end. |
-| `src/bot.ts` | `npm run bot` — the executor. |
-| `src/pay.ts` | `npm run pay -- <tag> [xrp]` — the customer side of a checkout. |
-| `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js` and `plan.js` from the same source the SDK uses, so the page cannot drift from the tests. |
+| `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price. |
+| `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books. |
+| `src/pay.ts` | `npm run pay -- <tag> [xrp] [--usd n] [--net xrp] [--split] [--quote]` — the customer side. |
+| `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
 | `parity/` | The real Solidity limiter, and the harness that proves we match it. |
-| `qa/render.mjs` | `npm run qa` — renders the page in Chromium and WebKit and fails on console errors, horizontal overflow, or a `100dvh` that disagrees with the viewport. |
+| `qa/render.mjs` | `npm run qa` — Chromium and WebKit, failing on console errors, horizontal overflow, a `100dvh` that disagrees with the viewport, **text painted over by something opaque**, and **panels still showing their loading text**. It runs a deliberately broken fixture first and fails if that page comes back clean. |
 
 ## Running the executor
 

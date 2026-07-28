@@ -123,10 +123,13 @@ Contracts used (all Flare's own, resolved through the ContractRegistry at
 | Outcome reader | `directMintingDelayState` polling that waits out `allowedAt` instead of guessing it | `src/chain.ts` |
 | FDC round trip | prepareRequest → `requestAttestation` → voting round → DA layer proof, decoded to the struct the facet takes | `src/fdc.ts` |
 | Executor bot | Delay treated as a delay: on-chain delay state beats local cache, proofs reused across attempts, no early retries, lost races retired instead of looped | `src/bot.ts` |
-| Merchant checkout | The customer-side tagged XRPL payment | `src/pay.ts` |
-| Dashboard | Raw getter vs real state, capacity, simulator, FTSO pricing, no build step | `dashboard/` |
-| Parity harness | The verified `MintingRateLimiter.sol` copied byte for byte, run under Foundry across 17 scenarios; the TypeScript is checked against what it actually did, not against our reading of it | `parity/`, `test/parity.test.ts` |
-| Render QA | Chromium + WebKit checks for console errors, horizontal overflow and `100dvh` drift — it found a masthead that pushed the page 19px wide on a phone and a hero canvas rendering through the opening paragraph | `qa/render.mjs` |
+| Merchant checkout | The customer-side tagged XRPL payment, priced in XRP, in USD off the FTSO, or as "make sure the merchant receives X" | `src/pay.ts` |
+| Fee inversion | `_computeFees` replayed, and inverted: the system fee is `max(0.25%, 0.1 XRP)` so it is a flat charge on small baskets and a percentage on large ones, and a merchant who invoices the sticker price is underpaid on every sale. Also catches payments below the minimum fee, which mint nothing at all | `src/fees.ts` |
+| Executor exclusivity | `othersCanExecuteAfterSeconds` runs from the payment's own timestamp. The bot waits it out on other people's tags instead of skipping them, so a merchant whose executor is down still gets paid | `src/bot.ts` |
+| Executor books | `--report`: won, lost, pending, fees actually earned. Racing costs a proof and gas whether or not it lands | `src/bot.ts` |
+| Dashboard | Raw getter vs real state, capacity, simulator, split planner, and a merchant checkout that prices a USD basket off the FTSO and shows every deduction | `dashboard/` |
+| Parity harness | The verified `MintingRateLimiter.sol` copied byte for byte, run under Foundry. 217 vectors — 17 hand-chosen scenarios plus 200 from deterministic random walks — and the TypeScript is checked against what it actually did, not against our reading of it. Seven mutations tried, six caught, the survivor provably equivalent | `parity/`, `test/parity.test.ts` |
+| Render QA | Chromium + WebKit. Console errors, horizontal overflow, `100dvh` drift, **text painted over by something opaque**, and **panels still showing their loading text**. It found a masthead that pushed the page 19px wide on a phone and a hero canvas rendering through the opening paragraph — both by eye at the time, and the coverage check now catches that class automatically. The suite runs a deliberately broken fixture first and fails if it comes back clean | `qa/render.mjs`, `qa/fixtures/` |
 | Field notes | Every claim above traced to the verified on-chain source | `NOTES.md` |
 
 ---
@@ -139,8 +142,12 @@ Contracts used (all Flare's own, resolved through the ContractRegistry at
   was still paid — the rail does not depend on us. We left the finding in rather
   than deleting it, because it is the clearest statement of why the predictor
   exists. The fix is the one the protocol already provides: set the tag's
-  `allowedExecutor`, wait out the 600s cooldown, and the second payment was ours
+  `allowedExecutor`, wait out the cooldown, and the second payment was ours
   to finalise inside the exclusive window.
+- **We had a wrong number written down.** Our notes said the exclusivity window
+  was 600 seconds. `getDirectMintingOthersCanExecuteAfterSeconds()` reads 7200 on
+  both networks. Nothing broke, because the bot reads the setting rather than
+  holding a constant — which is the point. The note is corrected.
 - **Window sizes are assumed, then checked.** They are fixed at initialisation and
   never exposed by a getter. We assume 3600 and 86400 and assert that the on-chain
   window start is aligned to them, so a change fails loudly instead of silently

@@ -68,6 +68,57 @@ async function check(browser, engine, label, contextOptions, url, shot) {
   if (m.overflow > 2) problems.push(`horizontal overflow: ${m.overflow}px`);
   if (Math.abs(m.dvh - m.inner) > 2) problems.push(`100dvh ${m.dvh} != viewport ${m.inner}`);
 
+  // Is the text actually readable, or is something painted over it? The dither
+  // canvas rendering through the opening paragraph was found by a human looking
+  // at a screenshot; this asks the browser instead. Hit-testing rather than
+  // comparing pixels, so it does not go flaky when live numbers change width.
+  const covered = await page.evaluate(() => {
+    const TEXT = "h1,h2,h3,h4,p,li,td,th,a,label,figcaption,button";
+    const hits = [];
+    const step = Math.round(window.innerHeight * 0.8);
+    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+      window.scrollTo(0, y);
+      for (const el of document.querySelectorAll(TEXT)) {
+        if (!el.textContent.trim()) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 8 || r.height < 8) continue;
+        if (r.top < 0 || r.bottom > window.innerHeight) continue;
+        // a point inside the first line of text, off the left edge where a
+        // centred point could fall in the gap between words
+        const x = Math.round(r.left + Math.min(r.width * 0.25, 40));
+        const yy = Math.round(r.top + Math.min(r.height * 0.5, 8));
+        const stack = document.elementsFromPoint(x, yy);
+        const i = stack.indexOf(el);
+        if (i < 0) continue; // not hit at all — probably a gap, not a cover
+        const over = stack.slice(0, i).find((o) => !el.contains(o));
+        if (!over) continue;
+        const bg = getComputedStyle(over).backgroundColor;
+        const opaque = over.tagName === "CANVAS" || over.tagName === "IMG" ||
+          (bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg));
+        if (opaque) {
+          hits.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""} "${el.textContent.trim().slice(0, 28)}" under <${over.tagName.toLowerCase()}>`);
+        }
+      }
+    }
+    window.scrollTo(0, 0);
+    return [...new Set(hits)];
+  });
+  for (const c of covered.slice(0, 4)) problems.push(`text covered: ${c}`);
+
+  // "It rendered" is not "it has anything in it". A panel that reads the chain
+  // and quietly stays on its loading text looks perfectly fine to every check
+  // above.
+  const empty = await page.evaluate(() =>
+    [...document.querySelectorAll("table")]
+      .filter((t) => !t.closest("[hidden]"))
+      .filter((t) => {
+        const b = t.querySelector("tbody");
+        return !b || !b.rows.length || /reading chain|loading|…$/i.test(b.innerText.trim());
+      })
+      .map((t) => t.id || "table"),
+  );
+  for (const e of empty) problems.push(`empty panel: #${e}`);
+
   fs.mkdirSync(shotDir, { recursive: true });
   await page.screenshot({ path: path.join(shotDir, shot) });
   await ctx.close();
@@ -92,4 +143,12 @@ await wk.close();
 
 s.close();
 console.log(bad ? `\n${bad} problem(s)` : "\nclean");
+
+// --expect-fail: for the deliberately broken fixture. A checker nobody ever saw
+// fail is not a checker, so the suite runs one page that must come back dirty.
+if (args.includes("--expect-fail")) {
+  if (bad) console.log("expected problems, and found them");
+  else console.log("EXPECTED PROBLEMS AND FOUND NONE — the checks have stopped working");
+  process.exit(bad ? 0 : 1);
+}
 process.exit(bad ? 1 : 0);

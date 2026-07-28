@@ -11,9 +11,9 @@
     "prove": "tsx src/prove.ts",
     "bot": "tsx src/bot.ts",
     "pay": "tsx src/pay.ts",
-    "build:web": "tsc src/limiter.ts src/plan.ts --outDir dashboard --target es2022 --module es2022 --moduleResolution bundler --typeRoots /nonexistent",
+    "build:web": "tsc src/limiter.ts src/plan.ts src/fees.ts --outDir dashboard --target es2022 --module es2022 --moduleResolution bundler --typeRoots /nonexistent",
     "parity": "forge test --root parity",
-    "qa": "node qa/render.mjs dashboard",
+    "qa": "node qa/render.mjs qa/fixtures/covered --expect-fail && node qa/render.mjs dashboard",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

@@ -1,0 +1,34 @@
+<!doctype html>
+<!--
+  A page that is broken in the exact way the landing page was: an opaque canvas
+  painted over the opening paragraph. Type checkers and unit tests call this
+  fine. `node qa/render.mjs qa/fixtures/covered` must call it broken — if it
+  ever reports "clean", the text-coverage check has stopped working.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>covered text fixture</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+  main { position: relative; padding: 24px; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 220px; }
+  /* static, so the positioned canvas paints on top of it — the actual bug */
+  p { max-width: 40ch; }
+</style>
+<main>
+  <canvas id="plate" width="400" height="220"></canvas>
+  <p id="lede">This paragraph sits underneath an opaque canvas, which is what the
+    landing page did on narrow screens. Nothing throws, nothing overflows, and
+    the page is unreadable.</p>
+</main>
+<!-- and a panel that never finished loading, which every other check calls fine -->
+<table id="dead">
+  <thead><tr><th>Window</th><th>Limit</th></tr></thead>
+  <tbody><tr><td colspan="2">reading chain…</td></tr></tbody>
+</table>
+<script>
+  const c = document.getElementById("plate");
+  const g = c.getContext("2d");
+  g.fillStyle = "#111";
+  g.fillRect(0, 0, c.width, c.height);
+</script>
