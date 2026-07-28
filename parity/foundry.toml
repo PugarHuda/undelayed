@@ -1,0 +1,8 @@
+[profile.default]
+src = "src"
+test = "test"
+libs = ["lib"]
+solc = "0.8.27"
+remappings = ["@openzeppelin/contracts/=lib/openzeppelin/"]
+# the vector generator writes one file next to the tests
+fs_permissions = [{ access = "read-write", path = "./out-vectors" }]

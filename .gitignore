@@ -1,0 +1,22 @@
+node_modules/
+
+# executor bot state — per-deployment, and it names payments we have handled
+bot-state.*.json
+
+# parity harness: forge-std is cloned, build artifacts are disposable.
+# out-vectors/ IS checked in — it is the record of what the real Solidity
+# limiter did, and `npm test` checks the TypeScript against it without needing
+# forge installed.
+# lib/* rather than lib/, so the vendored OpenZeppelin file the limiter imports
+# can be re-included: git will not look inside an excluded directory.
+parity/lib/*
+!parity/lib/openzeppelin/
+parity/out/
+parity/cache/
+
+# QA screenshots
+qa/shots/
+
+.env
+.env.*
+!.env.example

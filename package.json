@@ -1,0 +1,29 @@
+{
+  "name": "undelayed",
+  "version": "0.1.0",
+  "description": "Predict when a FAssets direct minting is actually allowed to execute.",
+  "type": "module",
+  "bin": {
+    "undelayed": "src/cli.ts"
+  },
+  "scripts": {
+    "probe": "tsx src/cli.ts",
+    "prove": "tsx src/prove.ts",
+    "bot": "tsx src/bot.ts",
+    "pay": "tsx src/pay.ts",
+    "build:web": "tsc src/limiter.ts src/plan.ts --outDir dashboard --target es2022 --module es2022 --moduleResolution bundler --typeRoots /nonexistent",
+    "parity": "forge test --root parity",
+    "qa": "node qa/render.mjs dashboard",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "viem": "^2.21.0",
+    "xrpl": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "playwright": "^1.62.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
