@@ -1,4 +1,5 @@
-import { readLimits, ask, capacityUba, type Network } from "./chain.js";
+import { readLimits, ask, capacityUba, NETWORKS, type Network } from "./chain.js";
+import { fees } from "./fees.js";
 import { advance } from "./limiter.js";
 import { comparePlans } from "./plan.js";
 
@@ -14,9 +15,22 @@ const dur = (s: bigint) => {
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
 };
 
+const NETWORKS_HELP = "coston2 | flare | songbird";
 const network = (process.argv[2] ?? "coston2") as Network;
+if (!(network in NETWORKS)) {
+  console.error(`\n  unknown network ${JSON.stringify(network)} — expected ${NETWORKS_HELP}\n`);
+  process.exit(2);
+}
+
 const amountXrp = process.argv[3] ?? "1000";
-const amountUba = BigInt(Math.round(Number(amountXrp) * Number(XRP)));
+const parsed = Number(amountXrp);
+// BigInt(NaN) throws a RangeError with a stack trace and no explanation of
+// which argument was wrong.
+if (!Number.isFinite(parsed) || parsed < 0) {
+  console.error(`\n  ${JSON.stringify(amountXrp)} is not an amount in XRP\n`);
+  process.exit(2);
+}
+const amountUba = BigInt(Math.round(parsed * Number(XRP)));
 
 const snap = await readLimits(network);
 const g = snap.granularityUba;
@@ -56,6 +70,18 @@ if (a.delayed && !a.consumesWindowQuota) {
   console.log(`  (retrying before ${ts(a.allowedAt)} reverts DirectMintingStillDelayed)`);
 }
 
+// Timing is not the only thing the raw API hides. Whoever receives this minting
+// is credited less than was sent, and this was the one surface that did not say
+// so — the dashboard and the checkout both do.
+const b = fees(amountUba, snap.fees);
+console.log(
+  b.tooSmall
+    ? `  and it mints NOTHING: below the ${fmt(snap.fees.minimumFeeUba)} XRP minimum fee, the payment is rejected outright`
+    : `  recipient is credited ${fmt(b.netUba)} XRP` +
+      ` (${fmt(b.mintingFeeUba)} system fee${b.mintingFeeUba === snap.fees.minimumFeeUba ? ", the minimum" : ""}` +
+      `, ${fmt(b.executorFeeUba)} executor fee)`,
+);
+
 if (a.delayed) {
   const c = comparePlans(snap, amountUba / g, snap.now);
   console.log(`\n  split into ${c.split.chunks.length} payments instead:`);
@@ -70,6 +96,16 @@ if (a.delayed) {
       ? `  first XRP arrives ${dur(c.firstArrivalSaved)} sooner, and the tail lands no later.`
       : `  but the tail then lands ${dur(c.split.lastAt - c.single.lastAt)} later than one payment` +
         ` — splitting is not free here.`,
+  );
+  // And it is not free in fees either: every piece is charged separately.
+  const splitCost = c.split.chunks.reduce((acc, ch) => {
+    const f = fees(ch.amountAmg * g, snap.fees);
+    return acc + f.mintingFeeUba + f.executorFeeUba;
+  }, 0n);
+  const oneCost = b.mintingFeeUba + b.executorFeeUba;
+  console.log(
+    `  fees ${fmt(oneCost)} -> ${fmt(splitCost)} XRP` +
+      ` (${splitCost > oneCost ? "+" : ""}${fmt(splitCost - oneCost)}), one charge per piece.`,
   );
 }
 console.log();
