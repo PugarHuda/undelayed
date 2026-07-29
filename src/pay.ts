@@ -18,20 +18,31 @@ import { Client, Wallet } from "xrpl";
 import { readLimits, xrpUsd, ask } from "./chain.js";
 import { fees, invoice, invoiceSplit, usdToUba } from "./fees.js";
 import { comparePlans, splitAmounts } from "./plan.js";
+import { parseTag, parseAmount } from "./args.js";
 
 const ARGS = process.argv.slice(2);
 const flag = (name: string) => {
   const i = ARGS.indexOf(`--${name}`);
   return i >= 0 ? ARGS[i + 1] : undefined;
 };
-const tag = Number(ARGS[0]);
+/** Bad arguments are a usage error, not a crash: a message and exit 2, like the
+ *  probe. A stack trace tells the reader about our call stack, not their typo. */
+function orExit<T>(f: () => T): T {
+  try {
+    return f();
+  } catch (e: any) {
+    console.error(`\n  ${e.message}`);
+    console.error(`  usage: npm run pay -- <tag> [amountXRP] [--net XRP] [--usd USD] [--split] [--quote]\n`);
+    process.exit(2);
+  }
+}
+
+const tag = orExit(() => parseTag(ARGS[0]));
 const quoteOnly = ARGS.includes("--quote");
 const netXrp = flag("net");
 const usd = flag("usd");
 const plainAmount = ARGS[1] && !ARGS[1].startsWith("--") ? ARGS[1] : undefined;
-if (!Number.isInteger(tag)) {
-  throw new Error("usage: npm run pay -- <tag> [amountXRP] [--net XRP] [--usd USD] [--quote]");
-}
+
 
 const XRP = 1_000_000n;
 const show = (uba: bigint) => (Number(uba) / 1e6).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
@@ -55,15 +66,15 @@ const grossFor = (wantUba: bigint) =>
 if (usd !== undefined) {
   const price = await xrpUsd("coston2");
   if (price === null) throw new Error("no XRP/USD feed — refusing to guess a checkout price");
-  const wantUba = usdToUba(Number(usd), price, snap.granularityUba);
+  const wantUba = usdToUba(orExit(() => parseAmount(usd, "--usd")), price, snap.granularityUba);
   sendUba = grossFor(wantUba);
   priced = `$${usd} at ${price.toFixed(6)} USD/XRP = ${show(wantUba)} XRP to the merchant`;
 } else if (netXrp !== undefined) {
-  const wantUba = BigInt(Math.round(Number(netXrp) * 1e6));
+  const wantUba = BigInt(Math.round(orExit(() => parseAmount(netXrp, "--net")) * 1e6));
   sendUba = grossFor(wantUba);
   priced = `${netXrp} XRP to the merchant`;
 } else {
-  sendUba = BigInt(Math.round(Number(plainAmount ?? "5") * 1e6));
+  sendUba = BigInt(Math.round(orExit(() => parseAmount(plainAmount ?? "5", "the amount")) * 1e6));
 }
 
 // One payment, or the split the planner recommends. Everything below is
