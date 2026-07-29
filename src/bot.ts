@@ -22,6 +22,7 @@ import { prepareRequest, submitRequest, fetchProof } from "./fdc.js";
 import { predict } from "./limiter.js";
 import { fees } from "./fees.js";
 import { decide } from "./decide.js";
+import { attemptPayment, type Entry as AttemptEntry } from "./attempt.js";
 import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
 
 const XRPL_RPC = {
@@ -40,16 +41,9 @@ const wantedTags = arg("tags")?.split(",").map((t) => BigInt(t.trim()));
 
 const STATE_FILE = fileURLToPath(new URL(`../bot-state.${network}.json`, import.meta.url));
 
-type Entry = {
-  request?: `0x${string}`;
-  votingRound?: number;
-  done?: boolean;
-  allowedAt?: number;
-  /** How this one ended, so `--report` can price the strategy rather than guess. */
-  outcome?: "won" | "lost";
-  feeUba?: string;
-  tag?: string;
-};
+// One definition, in attempt.ts, because two copies of the state shape drift and
+// the drift shows up as a type error at best and a lost proof at worst.
+type Entry = AttemptEntry;
 const state: Record<string, Entry> = existsSync(STATE_FILE)
   ? JSON.parse(readFileSync(STATE_FILE, "utf8"))
   : {};
@@ -153,57 +147,47 @@ async function tick() {
       console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${amount / 1_000_000n} XRP will be delayed (${p2.reason}) — the first call still has to register it`);
     }
 
-    // Reuse the request across attempts; a proof is paid for once.
-    let entry = state[txId] ?? {};
-    if (!entry.request) {
-      entry.request = await prepareRequest(network, txId);
-      const sub = await submitRequest(network, entry.request);
-      entry.votingRound = sub.votingRound;
-      state[txId] = entry;
-      save();
-      console.log(`  ${txId.slice(0, 12)} tag ${tag}: attestation requested, round ${sub.votingRound}`);
-    }
-    const proof = await fetchProof(network, entry.votingRound!, entry.request!, txId, {
-      onWait: (m) => console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${m}`),
-    });
-
-    // Simulate first: catches already-confirmed payments and executor lockouts
-    // without paying gas for the revert.
-    try {
-      await pc.simulateContract({
-        account,
-        address: snap.assetManager,
-        abi: EXECUTE_ABI,
-        functionName: "executeDirectMinting",
-        args: [proof as any],
-      });
-    } catch (e: any) {
-      const reason = `${e.shortMessage ?? e.message}`;
-      // PaymentAlreadyConfirmed() — a competing executor got there first. The
-      // merchant still received the FXRP; we just lost the fee and the proof we
-      // paid for. Retrying can never succeed, so stop tracking it.
-      if (reason.includes("0x18dce79f")) {
-        state[txId] = { ...entry, done: true, outcome: "lost", tag: String(tag) };
+    // Buy the proof once, retire a lost race, record what was actually earned.
+    // That sequence lives in attempt.ts, where it can be tested without a chain
+    // — it is the part where being wrong costs money.
+    const say = (m: string) => console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${m}`);
+    const res = await attemptPayment(state[txId] ?? {}, amount, snap.fees, {
+      requestProof: async () => {
+        const request = await prepareRequest(network, txId);
+        const sub = await submitRequest(network, request);
+        return { request, votingRound: sub.votingRound };
+      },
+      fetchProof: (votingRound, request) =>
+        fetchProof(network, votingRound, request as `0x${string}`, txId, { onWait: say }),
+      simulate: async (proof) => {
+        await pc.simulateContract({
+          account,
+          address: snap.assetManager,
+          abi: EXECUTE_ABI,
+          functionName: "executeDirectMinting",
+          args: [proof as any],
+        });
+      },
+      execute: async (proof) => {
+        const h = await wallet.writeContract({
+          address: snap.assetManager,
+          abi: EXECUTE_ABI,
+          functionName: "executeDirectMinting",
+          args: [proof as any],
+        });
+        await pc.waitForTransactionReceipt({ hash: h });
+        return h;
+      },
+      save: (e) => {
+        state[txId] = { ...e, tag: String(tag) };
         save();
-        console.log(`  ${txId.slice(0, 12)} tag ${tag}: another executor won the race — minted already, fee lost`);
-        continue;
-      }
-      console.log(`  ${txId.slice(0, 12)} tag ${tag}: not executable — ${reason}`);
-      continue;
-    }
-    const hash = await wallet.writeContract({
-      address: snap.assetManager,
-      abi: EXECUTE_ABI,
-      functionName: "executeDirectMinting",
-      args: [proof as any],
+      },
+      log: say,
     });
-    await pc.waitForTransactionReceipt({ hash });
-    // What we actually earned is not the executor fee setting: on a payment
-    // small enough that the system fee eats most of it, the executor is the one
-    // who goes short.
+    if (res.outcome !== "won") continue;
+
+    const hash = res.hash;
     const split = fees(amount, snap.fees);
-    state[txId] = { ...entry, done: true, outcome: "won", feeUba: String(split.executorFeeUba), tag: String(tag) };
-    save();
     const xrp = (uba: bigint) => Number(uba) / 1e6; // bigint division would floor 0.1 to 0
     console.log(
       `  ${txId.slice(0, 12)} tag ${tag}: ${xrp(split.netUba)} FXRP to ${recipient}, ` +

@@ -130,6 +130,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/fdc.ts` | The FDC round trip: prepare, request, wait for the round, pull the proof. |
 | `src/prove.ts` | `npm run prove -- <xrplTxHash>` — dry run one payment end to end. |
 | `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price — including when the payment will be split. |
+| `src/attempt.ts` | One payment from decision to outcome: buy the proof once, retire a lost race, record the fee actually paid. Injected dependencies, so the sequence that costs money has tests. |
 | `src/decide.ts` | What the executor should do about one payment, as a pure function: execute, wait, or skip. Extracted so the part that spends money can be tested. |
 | `src/economics.ts` | Whether running an executor pays. Measured gas, live prices, and the win rate it takes to break even. |
 | `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books and the economics. |
