@@ -87,6 +87,79 @@ check(
   pageErrors.slice(before).join("; "),
 );
 
+// ---- wrong path: the forms, unconnected and with nonsense in them -----------
+//
+// Clicking buttons proves they do not throw. Filling the forms proves the desk
+// refuses for a reason it can state. Nothing here is connected, so every action
+// has to end in a message rather than a silent no-op or a console trace.
+async function fillByLabel(label, value) {
+  const field = page.locator("label", { hasText: label }).locator("input").first();
+  if (!(await field.count())) return false;
+  await field.fill(String(value));
+  return true;
+}
+
+const beforeForms = pageErrors.length;
+const postTab = page.locator("button", { hasText: /post a block/i }).first();
+if (await postTab.count()) {
+  await postTab.click().catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+// A plausible block, then a series of values nobody should be able to submit.
+const filled = await fillByLabel("Lot (base units)", "120000");
+check("wrong path: the post form is reachable", filled, "no Lot field found");
+
+if (filled) {
+  const action = page.locator("button", { hasText: /^post block/i }).last();
+
+  // The right answer to "post a block with no wallet" is to ask for a wallet.
+  await action.click({ timeout: 4000 }).catch(() => {});
+  await page.waitForTimeout(900);
+  const prompted =
+    (await page.locator("[data-rk]").count()) > 0 ||
+    /connect|wallet/i.test((await page.textContent("body")) ?? "");
+  check("wrong path: posting unconnected asks for a wallet", prompted, "silent no-op");
+
+  // And close it. Leaving the modal open would make every click below land on
+  // an overlay — the loop would pass by testing nothing, which is how the last
+  // two of these went wrong.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+  check("wrong path: the wallet prompt closes again", (await page.locator("[data-rk] [role=dialog]").count()) === 0);
+
+  for (const bad of ["abc", "-1", "0", "", "1e999", "  "]) {
+    await fillByLabel("Lot (base units)", bad);
+    await fillByLabel("Deadline block", bad);
+    // Assert the field really took the value, so a fill that silently failed
+    // cannot be mistaken for a form that handled it.
+    const got = await page
+      .locator("label", { hasText: "Lot (base units)" })
+      .locator("input")
+      .first()
+      .inputValue();
+    check(`wrong path: the lot field accepted ${JSON.stringify(bad)} as typed`, got === bad, `field holds ${JSON.stringify(got)}`);
+
+    await action.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(250);
+    const text = (await page.textContent("body")) ?? "";
+    check(
+      `wrong path: no NaN on screen after posting ${JSON.stringify(bad)}`,
+      !/NaN|undefined|Infinity/.test(text),
+      text.slice(0, 60),
+    );
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+  }
+  check(
+    "wrong path: bad form input raised no uncaught error",
+    pageErrors.length === beforeForms,
+    pageErrors.slice(beforeForms).join("; "),
+  );
+  // And the page is still usable afterwards, not wedged.
+  check("wrong path: the desk is still standing", /BUTA/i.test((await page.textContent("body")) ?? ""));
+}
+
 // ---- wrong path: the desk must not phone home to a proxy it does not own ----
 const foreign = requests.filter(
   (u) => /flare\.rocks|walletconnect|web3modal/i.test(u),
