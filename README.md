@@ -10,7 +10,7 @@ Live dashboard: **https://undelayed.vercel.app**
 
 ```
 npm install
-npm test                              # 15 cases, including parity with the real contract
+npm test                              # 53 cases, including parity with the real contract
 npm run probe -- coston2 120000       # if I mint 120k XRP now, what happens?
 npm run probe -- flare 1000           # same question on mainnet
 ```
