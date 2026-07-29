@@ -29,7 +29,9 @@ const { hash, fee, votingRound, epochSeconds } = await submitRequest(network, re
 console.log(`  requested on-chain: ${hash}`);
 console.log(`  fee ${fee} wei, voting round ${votingRound} (${epochSeconds}s rounds)\n`);
 
-const proof = await fetchProof(network, votingRound, request);
+const proof = await fetchProof(network, votingRound, request, transactionId, {
+  onWait: (m) => console.log(`  ${m}`),
+});
 const body = proof.data.responseBody;
 const XRP = 1_000_000n;
 console.log(`  proof: ${proof.merkleProof.length} merkle nodes`);

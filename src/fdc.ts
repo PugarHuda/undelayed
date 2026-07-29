@@ -13,7 +13,6 @@ import {
   parseAbi,
   decodeAbiParameters,
   parseAbiParameters,
-  toHex,
   padHex,
   stringToHex,
 } from "viem";
@@ -70,6 +69,11 @@ export async function prepareRequest(
       requestBody: { transactionId, proofOwner },
     }),
   });
+  // Check the transport before the payload: a 500 or an HTML error page makes
+  // res.json() throw something that says nothing about what went wrong.
+  if (!res.ok) {
+    throw new Error(`verifier ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
   const body = (await res.json()) as { status: string; abiEncodedRequest?: `0x${string}` };
   if (body.status !== "VALID" || !body.abiEncodedRequest) {
     throw new Error(`verifier rejected the request: ${body.status}`);
@@ -165,15 +169,60 @@ export type XRPPaymentProof = { merkleProof: `0x${string}`[]; data: XRPPaymentRe
 const decodeResponse = (hex: `0x${string}`) =>
   decodeAbiParameters(RESPONSE_ABI, hex)[0] as unknown as XRPPaymentResponse;
 
+/** XRPPayment status codes. 0 is a payment that actually succeeded on XRPL. */
+export const PAYMENT_SUCCESS = 0;
+
+/**
+ * Is this proof the one we asked for?
+ *
+ * The DA layer is a service we do not run, keyed by a round and a request blob,
+ * and what comes back goes straight into executeDirectMinting. Handing the facet
+ * a proof for a different payment costs gas on a revert at best; at worst it is
+ * an executor confidently finalising something it never checked. Nothing in the
+ * happy path notices, because a valid proof for the wrong payment is still a
+ * valid proof.
+ *
+ * Pure, so the checks can be tested without a network.
+ */
+export function checkProof(
+  proof: XRPPaymentProof,
+  expected: { transactionId: `0x${string}`; sourceId: string; votingRound: number },
+): string[] {
+  const problems: string[] = [];
+  const d = proof.data;
+  const got = d.requestBody.transactionId.toLowerCase();
+  if (got !== expected.transactionId.toLowerCase()) {
+    problems.push(`proof is for ${got}, not ${expected.transactionId}`);
+  }
+  if (d.attestationType !== name32("XRPPayment")) {
+    problems.push(`attestation type is ${d.attestationType}, not XRPPayment`);
+  }
+  if (d.sourceId !== name32(expected.sourceId)) {
+    problems.push(`source is ${d.sourceId}, not ${expected.sourceId}`);
+  }
+  if (d.votingRound !== BigInt(expected.votingRound)) {
+    problems.push(`proof is from round ${d.votingRound}, not ${expected.votingRound}`);
+  }
+  if (d.responseBody.status !== PAYMENT_SUCCESS) {
+    problems.push(`the XRPL payment did not succeed (status ${d.responseBody.status})`);
+  }
+  // An empty Merkle proof is legitimate when the round held exactly one
+  // attestation — the response IS the root — so it is not checked here.
+  return problems;
+}
+
 /**
  * Polls the DA layer until the round is finalised. Rounds are ~90s and the
  * proof only appears once the round is signed, so this is minutes, not seconds.
+ *
+ * Takes the transaction id so the answer can be checked against the question.
  */
 export async function fetchProof(
   network: Network,
   votingRoundId: number,
   request: `0x${string}`,
-  { tries = 40, intervalMs = 15_000 } = {},
+  transactionId: `0x${string}`,
+  { tries = 40, intervalMs = 15_000, onWait = (_: string) => {} } = {},
 ): Promise<XRPPaymentProof> {
   const cfg = FDC[network as keyof typeof FDC];
   for (let i = 0; i < tries; i++) {
@@ -188,12 +237,23 @@ export async function fetchProof(
         proof?: `0x${string}`[];
       };
       if (body.response_hex) {
-        return { merkleProof: body.proof ?? [], data: decodeResponse(body.response_hex) };
+        const proof = { merkleProof: body.proof ?? [], data: decodeResponse(body.response_hex) };
+        const problems = checkProof(proof, {
+          transactionId,
+          sourceId: cfg.sourceId,
+          votingRound: votingRoundId,
+        });
+        if (problems.length) throw new Error(`DA layer returned the wrong proof: ${problems.join("; ")}`);
+        return proof;
       }
+    } else if (res.status !== 404 && res.status < 500) {
+      // 404 means "the round is not ready yet" and is the whole reason we poll.
+      // Any other 4xx — a bad key, a malformed request — will say the same thing
+      // forty times over, and waiting ten minutes to hear it is not patience.
+      throw new Error(`DA layer ${res.status}: ${(await res.text()).slice(0, 200)}`);
     }
+    onWait(`round ${votingRoundId} not finalised yet (${i + 1}/${tries})`);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`no proof for round ${votingRoundId} after ${tries} tries`);
 }
-
-export { toHex };

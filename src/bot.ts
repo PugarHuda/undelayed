@@ -163,7 +163,9 @@ async function tick() {
       save();
       console.log(`  ${txId.slice(0, 12)} tag ${tag}: attestation requested, round ${sub.votingRound}`);
     }
-    const proof = await fetchProof(network, entry.votingRound!, entry.request!);
+    const proof = await fetchProof(network, entry.votingRound!, entry.request!, txId, {
+      onWait: (m) => console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${m}`),
+    });
 
     // Simulate first: catches already-confirmed payments and executor lockouts
     // without paying gas for the revert.
