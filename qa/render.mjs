@@ -141,9 +141,13 @@ async function check(browser, engine, label, contextOptions, url, shot) {
   return problems.length;
 }
 
-const { s, port } = await serve(pageDir);
-const url = `http://127.0.0.1:${port}/index.html`;
-const name = path.basename(pageDir);
+// A directory, or a deployed URL. Checking the built artifact is not the same
+// as checking the page people open: the deploy config, the rewrites and the
+// environment are all only real once it is live.
+const live = /^https?:\/\//.test(pageDir);
+const { s, port } = live ? { s: { close() {} }, port: 0 } : await serve(pageDir);
+const url = live ? pageDir : `http://127.0.0.1:${port}/index.html`;
+const name = live ? new URL(pageDir).hostname.split(".")[0] : path.basename(pageDir);
 let bad = 0;
 
 const cr = await chromium.launch();
