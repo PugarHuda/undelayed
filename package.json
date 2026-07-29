@@ -14,8 +14,8 @@
     "build:web": "tsc src/limiter.ts src/plan.ts src/fees.ts src/economics.ts --outDir dashboard --target es2022 --module es2022 --moduleResolution bundler --typeRoots /nonexistent",
     "parity": "forge test --root parity",
     "qa": "node qa/render.mjs qa/fixtures/covered --expect-fail && node qa/render.mjs dashboard",
-    "qa:flows": "node qa/flows.mjs dashboard && node qa/flows-desk.mjs",
-    "qa:live": "node qa/render.mjs https://undelayed.vercel.app && node qa/render.mjs https://buta-desk.vercel.app && node qa/render.mjs https://buta-app.vercel.app && node qa/flows.mjs https://undelayed.vercel.app && node qa/flows-desk.mjs",
+    "qa:flows": "node qa/flows.mjs dashboard && node qa/flows-landing.mjs ../buta/landing && node qa/flows-desk.mjs",
+    "qa:live": "node qa/render.mjs https://undelayed.vercel.app && node qa/render.mjs https://buta-desk.vercel.app && node qa/render.mjs https://buta-app.vercel.app && node qa/flows.mjs https://undelayed.vercel.app && node qa/flows-landing.mjs https://buta-desk.vercel.app && node qa/flows-desk.mjs",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
