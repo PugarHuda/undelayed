@@ -136,6 +136,8 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/pay.ts` | `npm run pay -- <tag> [xrp] [--usd n] [--net xrp] [--split] [--quote]` — the customer side. |
 | `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
 | `parity/` | The real Solidity limiter, and the harness that proves we match it. |
+| `qa/flows.mjs` | `npm run qa:flows` — drives the page: prices a basket, splits a mint, then feeds every input garbage, negatives, zero, empty, 1e999. A form that keeps its last good answer for a question nobody asked is the bug it exists to catch. |
+| `qa/flows-desk.mjs` | The same for the Buta desk, where the honest-offline state is the happy path. |
 | `qa/render.mjs` | `npm run qa` — Chromium and WebKit, failing on console errors, horizontal overflow, a `100dvh` that disagrees with the viewport, **text painted over by something opaque**, and **panels still showing their loading text**. It runs a deliberately broken fixture first and fails if that page comes back clean. |
 
 ## Running the executor
