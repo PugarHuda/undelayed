@@ -60,6 +60,38 @@ export function invoice(wantNetUba, cfg) {
     return fees(paid, cfg);
 }
 /**
+ * The same inverse, for a payment that will be split into pieces.
+ *
+ * `invoice()` grosses up for ONE set of fees. Split the result and every piece
+ * is charged separately — its own executor fee, and its own minimum system fee
+ * if it is small — so the merchant lands short by exactly the fees nobody
+ * counted. Grossing up once and then splitting is the bug this exists to stop.
+ *
+ * `split` is passed in rather than imported so this stays free of the limiter:
+ * how an amount is cut up is a rate-limit question, what it costs is not.
+ */
+export function invoiceSplit(wantNetUba, cfg, split) {
+    let gross = invoice(wantNetUba, cfg).paidUba;
+    // Covering the shortfall re-splits, which can add a piece, which costs another
+    // fee — so it iterates. Adding the raw shortfall converges, but only
+    // geometrically: with pieces small enough that fees eat most of each one, it
+    // takes dozens of rounds. Scaling by the observed net-per-gross ratio closes
+    // it in two or three, and the max() keeps it monotone when the ratio rounds
+    // down. The cap is a tripwire, not an expected exit.
+    for (let round = 0; round < 24; round++) {
+        const amounts = split(gross);
+        const pieces = amounts.map((a) => fees(a, cfg));
+        const netUba = pieces.reduce((a, p) => a + p.netUba, 0n);
+        if (netUba >= wantNetUba) {
+            return { paidUba: amounts.reduce((a, b) => a + b, 0n), amounts, netUba, pieces };
+        }
+        const bumped = gross + (wantNetUba - netUba);
+        const scaled = netUba > 0n ? ceilDiv(gross * wantNetUba, netUba) : bumped;
+        gross = scaled > bumped ? scaled : bumped;
+    }
+    throw new Error(`could not gross up ${wantNetUba} for a split payment`);
+}
+/**
  * A price in USD, at an FTSO XRP/USD reading, as an XRP amount in UBA.
  * Rounds up: rounding down invoices the customer for less than the sticker.
  */

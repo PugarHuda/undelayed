@@ -119,6 +119,20 @@ async function check(browser, engine, label, contextOptions, url, shot) {
   );
   for (const e of empty) problems.push(`empty panel: #${e}`);
 
+  // A number that failed to compute renders perfectly. "NaN" in a fee table is
+  // a wrong answer presented with total confidence, which is worse than a blank
+  // one — and no type checker sees it, because NaN is a number.
+  const bad = await page.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll("td, .big, .verdict, .note")) {
+      const t = el.textContent || "";
+      const m = t.match(/\b(NaN|undefined|null|Infinity|-Infinity)\b/);
+      if (m) out.push(`${m[1]} in "${t.trim().slice(0, 40)}"`);
+    }
+    return [...new Set(out)];
+  });
+  for (const b of bad.slice(0, 4)) problems.push(`bad value: ${b}`);
+
   fs.mkdirSync(shotDir, { recursive: true });
   await page.screenshot({ path: path.join(shotDir, shot) });
   await ctx.close();

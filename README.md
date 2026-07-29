@@ -56,6 +56,30 @@ on every sale. `src/fees.ts` inverts the formula and gives the smallest payment
 that nets the price — checked by a test that also proves one drop less is not
 enough.
 
+Splitting changes the answer. Every piece is charged separately, so grossing up
+for one payment and *then* splitting leaves the merchant short by exactly the
+fees nobody counted — `invoiceSplit` grosses up against the pieces that will
+actually be sent.
+
+## Is running an executor worth it?
+
+```
+npm run bot -- --report
+
+  economics — gas 650 gwei, FLR $0.0062, XRP $1.0717
+  per win   +$0.1072 fee  -$0.0018 gas  = $0.1054
+  per loss  -$0.0003  (the attestation, paid before you know)
+  smallest paying payment 0.102 XRP
+  break-even win rate 0.3%
+```
+
+The executor fee is a prize in a race, not a salary: an executor that requests a
+proof and loses has paid for a call it can never make. The gas figures are the
+ones our own transactions burned (356,375 to execute, 82,947 to request), priced
+at the live gas price and FTSO FLR/USD. At today's prices the rail clears its
+costs by a wide margin, and the binding constraint is not gas — it is the
+0.1 XRP minimum system fee, below which there is no executor fee left to earn.
+
 ```
   hourly limit   100,000 XRP   on-chain reads         1 used   actually  0 used   <- window rolled 4h 1m ago
   daily  limit   500,000 XRP   on-chain reads 16,285.658 used   actually  0 used   <- window rolled 26h 1m ago
@@ -105,8 +129,10 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/cli.ts` | `npm run probe` — capacity and the simulator. |
 | `src/fdc.ts` | The FDC round trip: prepare, request, wait for the round, pull the proof. |
 | `src/prove.ts` | `npm run prove -- <xrplTxHash>` — dry run one payment end to end. |
-| `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price. |
-| `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books. |
+| `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price — including when the payment will be split. |
+| `src/decide.ts` | What the executor should do about one payment, as a pure function: execute, wait, or skip. Extracted so the part that spends money can be tested. |
+| `src/economics.ts` | Whether running an executor pays. Measured gas, live prices, and the win rate it takes to break even. |
+| `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books and the economics. |
 | `src/pay.ts` | `npm run pay -- <tag> [xrp] [--usd n] [--net xrp] [--split] [--quote]` — the customer side. |
 | `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
 | `parity/` | The real Solidity limiter, and the harness that proves we match it. |

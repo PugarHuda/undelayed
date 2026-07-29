@@ -17,10 +17,12 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { client, readLimits, NETWORKS, type Network } from "./chain.js";
+import { client, readLimits, xrpUsd, flrUsd, NETWORKS, type Network } from "./chain.js";
 import { prepareRequest, submitRequest, fetchProof } from "./fdc.js";
 import { predict } from "./limiter.js";
 import { fees } from "./fees.js";
+import { decide } from "./decide.js";
+import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
 
 const XRPL_RPC = {
   coston2: "https://s.altnet.rippletest.net:51234/",
@@ -66,8 +68,6 @@ const TAG_ABI = parseAbi([
   "function mintingRecipient(uint256) view returns (address)",
   "function allowedExecutor(uint256) view returns (address)",
 ]);
-
-const ZERO = "0x0000000000000000000000000000000000000000";
 
 /** XRPL timestamps count from 2000-01-01, not 1970. */
 const RIPPLE_EPOCH = 946_684_800n;
@@ -118,23 +118,6 @@ async function tick() {
       pc.readContract({ address: snap.mintingTagManager, abi: TAG_ABI, functionName: "mintingRecipient", args: [tag] }),
       pc.readContract({ address: snap.mintingTagManager, abi: TAG_ABI, functionName: "allowedExecutor", args: [tag] }),
     ]);
-    if (recipient === ZERO) continue; // unregistered tag, not ours to serve
-
-    // A tag's allowedExecutor is exclusive for othersCanExecuteAfterSeconds,
-    // measured from the payment's own underlying timestamp — not from when we
-    // noticed it. After that the rail is permissionless again, so this is a
-    // wait, not a skip: dropping the payment entirely would leave a merchant
-    // unpaid whenever their own executor went down.
-    if (executor !== ZERO && executor.toLowerCase() !== account.address.toLowerCase()) {
-      const paidAt = BigInt(p.tx.date ?? 0) + RIPPLE_EPOCH;
-      const opensAt = paidAt + snap.othersCanExecuteAfterSeconds;
-      if (snap.now < opensAt) {
-        console.log(`  ${txId.slice(0, 12)} tag ${tag}: reserved for ${executor.slice(0, 10)} for another ${opensAt - snap.now}s`);
-        continue;
-      }
-      console.log(`  ${txId.slice(0, 12)} tag ${tag}: exclusivity expired, anyone may execute`);
-    }
-
     // On-chain truth about an earlier attempt beats anything cached locally.
     const [delayState, allowedAt] = (await pc.readContract({
       address: snap.assetManager,
@@ -142,10 +125,25 @@ async function tick() {
       functionName: "directMintingDelayState",
       args: [txId],
     })) as [number, bigint, bigint];
-    if (delayState === 1 && snap.now < allowedAt) {
-      state[txId] = { ...state[txId], allowedAt: Number(allowedAt) };
+
+    const call = decide({
+      recipient,
+      allowedExecutor: executor,
+      me: account.address,
+      now: snap.now,
+      paidAt: p.tx.date === undefined ? null : BigInt(p.tx.date) + RIPPLE_EPOCH,
+      exclusiveFor: snap.othersCanExecuteAfterSeconds,
+      delayState: delayState as 0 | 1 | 2,
+      allowedAt,
+      finished: Boolean(state[txId]?.done),
+    });
+    if (call.action === "skip") {
+      continue;
+    }
+    if (call.action === "wait") {
+      state[txId] = { ...state[txId], allowedAt: Number(call.until) };
       save();
-      console.log(`  ${txId.slice(0, 12)} tag ${tag}: delayed until ${new Date(Number(allowedAt) * 1000).toISOString()} — waiting, not retrying`);
+      console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${call.why} — waiting until ${new Date(Number(call.until) * 1000).toISOString().slice(11, 19)}, not retrying`);
       continue;
     }
 
@@ -217,7 +215,7 @@ async function tick() {
  * proof and gas whether or not it lands, so "we won one" is not the same as
  * "this is worth running".
  */
-function report() {
+async function report() {
   const rows = Object.entries(state);
   const won = rows.filter(([, e]) => e.outcome === "won");
   const lost = rows.filter(([, e]) => e.outcome === "lost");
@@ -237,11 +235,42 @@ function report() {
     const rate = (100 * won.length) / (won.length + lost.length);
     console.log(`  win rate ${rate.toFixed(0)}%`);
   }
+
+  // Whether any of that was worth doing. Gas is read live; the gas *amounts*
+  // are the ones our own transactions actually burned. FLR is priced off the
+  // FTSO because C2FLR has no price — a testnet token would flatter the
+  // numbers into meaninglessness.
+  const pc = client(network);
+  const snap = await readLimits(network);
+  const [gasPriceWei, xrp, flr] = await Promise.all([pc.getGasPrice(), xrpUsd(network), flrUsd(network)]);
+  if (xrp === null || flr === null) {
+    console.log(`\n  no FTSO price on ${network} — skipping the economics\n`);
+    return;
+  }
+  const costs = { ...COSTON2_MEASURED, gasPriceWei, nativeUsd: flr, xrpUsd: xrp };
+  const typical = snap.fees.minimumFeeUba + snap.fees.executorFeeUba + 5n * 1_000_000n;
+  const a = attempt(typical, snap.fees, costs);
+  const floor = payingPayment(snap.fees, costs);
+  const breakEven = breakEvenWinRate(typical, snap.fees, costs);
+
+  console.log(`\n  economics — gas ${Number(gasPriceWei) / 1e9} gwei, FLR $${flr.toFixed(4)}, XRP $${xrp.toFixed(4)}`);
+  console.log(`  per win   +$${a.revenueUsd.toFixed(4)} fee  -$${a.winCostUsd.toFixed(4)} gas  = $${a.winMarginUsd.toFixed(4)}`);
+  console.log(`  per loss  -$${a.lossCostUsd.toFixed(4)}  (the attestation, paid before you know)`);
+  console.log(
+    floor === null
+      ? `  no payment size is profitable at this gas price`
+      : `  smallest paying payment ${Number(floor) / 1e6} XRP`,
+  );
+  console.log(
+    breakEven === null
+      ? `  break-even win rate: unreachable`
+      : `  break-even win rate ${(breakEven * 100).toFixed(1)}%`,
+  );
   console.log();
 }
 
 if (ARGS.includes("--report")) {
-  report();
+  await report();
 } else {
   await tick();
   if (!once) setInterval(() => tick().catch((e) => console.error(e.message)), 20_000);

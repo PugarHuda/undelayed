@@ -36,8 +36,9 @@ const FTSO_ABI = parseAbi([
   "function getFeedById(bytes21) view returns (uint256,int8,uint64)",
 ]);
 
-/** FTSO v2 feed id for XRP/USD. */
+/** FTSO v2 feed ids: category 01 (crypto) followed by the ASCII pair. */
 const XRP_USD_FEED = "0x015852502f55534400000000000000000000000000" as const;
+const FLR_USD_FEED = "0x01464c522f55534400000000000000000000000000" as const;
 
 // The window sizes are fixed at initialization and never exposed by a getter,
 // so they are named constants here. readLimits asserts the on-chain window
@@ -173,10 +174,10 @@ export async function readLimits(
 }
 
 /**
- * XRP/USD from the FTSO, as a plain number. Returns null when the feed is not
- * reachable — a checkout that cannot price is a checkout that must not guess.
+ * One FTSO feed, as a plain number. Returns null when it is not reachable — a
+ * checkout that cannot price is a checkout that must not guess.
  */
-export async function xrpUsd(network: Network): Promise<number | null> {
+async function feedUsd(network: Network, feedId: `0x${string}`): Promise<number | null> {
   const pc = client(network);
   try {
     const ftso = await pc.readContract({
@@ -189,13 +190,22 @@ export async function xrpUsd(network: Network): Promise<number | null> {
       address: ftso,
       abi: FTSO_ABI,
       functionName: "getFeedById",
-      args: [XRP_USD_FEED],
+      args: [feedId],
     })) as [bigint, number, bigint];
     return Number(value) / 10 ** Number(decimals);
   } catch {
     return null;
   }
 }
+
+export const xrpUsd = (network: Network) => feedUsd(network, XRP_USD_FEED);
+
+/**
+ * FLR/USD. The executor pays gas in the native token, so pricing its costs
+ * needs this — and on Coston2 the native token is worthless, which would make
+ * any margin look infinite. The mainnet feed is the honest one to quote.
+ */
+export const flrUsd = (network: Network) => feedUsd(network, FLR_USD_FEED);
 
 /** "If I mint X XRP right now, when is execution allowed?" */
 export function ask(snap: Snapshot, amountUba: bigint, now = snap.now) {

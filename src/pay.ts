@@ -16,7 +16,7 @@
  */
 import { Client, Wallet } from "xrpl";
 import { readLimits, xrpUsd, ask } from "./chain.js";
-import { fees, invoice, usdToUba } from "./fees.js";
+import { fees, invoice, invoiceSplit, usdToUba } from "./fees.js";
 import { comparePlans, splitAmounts } from "./plan.js";
 
 const ARGS = process.argv.slice(2);
@@ -38,51 +38,73 @@ const show = (uba: bigint) => (Number(uba) / 1e6).toFixed(6).replace(/0+$/, "").
 
 const snap = await readLimits("coston2");
 
+const wantSplit = ARGS.includes("--split");
+/** How the planner would cut this gross amount, in UBA. */
+const cut = (grossUba: bigint) =>
+  splitAmounts(snap, grossUba / snap.granularityUba, snap.now).map((amg) => amg * snap.granularityUba);
+
 let sendUba: bigint;
 let priced = "";
+// A net target has to be grossed up against the fees the payment will actually
+// pay — which is a different number once it is split, because every piece is
+// charged separately. Grossing up for one payment and then splitting underpays
+// the merchant by exactly the fees nobody counted.
+const grossFor = (wantUba: bigint) =>
+  wantSplit ? invoiceSplit(wantUba, snap.fees, cut).paidUba : invoice(wantUba, snap.fees).paidUba;
+
 if (usd !== undefined) {
   const price = await xrpUsd("coston2");
   if (price === null) throw new Error("no XRP/USD feed — refusing to guess a checkout price");
   const wantUba = usdToUba(Number(usd), price, snap.granularityUba);
-  sendUba = invoice(wantUba, snap.fees).paidUba;
+  sendUba = grossFor(wantUba);
   priced = `$${usd} at ${price.toFixed(6)} USD/XRP = ${show(wantUba)} XRP to the merchant`;
 } else if (netXrp !== undefined) {
   const wantUba = BigInt(Math.round(Number(netXrp) * 1e6));
-  sendUba = invoice(wantUba, snap.fees).paidUba;
+  sendUba = grossFor(wantUba);
   priced = `${netXrp} XRP to the merchant`;
 } else {
   sendUba = BigInt(Math.round(Number(plainAmount ?? "5") * 1e6));
 }
 
-const b = fees(sendUba, snap.fees);
-if (b.tooSmall) {
+// One payment, or the split the planner recommends. Everything below is
+// reported over the pieces that will actually be sent, so the "merchant" line
+// is the total the merchant is really credited rather than the total of a
+// payment nobody is going to make.
+const amounts = wantSplit ? cut(sendUba) : [sendUba];
+const pieces = amounts.map((a) => fees(a, snap.fees));
+const total = pieces.reduce(
+  (a, p) => ({
+    paidUba: a.paidUba + p.paidUba,
+    mintingFeeUba: a.mintingFeeUba + p.mintingFeeUba,
+    executorFeeUba: a.executorFeeUba + p.executorFeeUba,
+    netUba: a.netUba + p.netUba,
+  }),
+  { paidUba: 0n, mintingFeeUba: 0n, executorFeeUba: 0n, netUba: 0n },
+);
+
+const small = pieces.findIndex((p) => p.tooSmall);
+if (small >= 0) {
   throw new Error(
-    `${show(sendUba)} XRP is below the ${show(snap.fees.minimumFeeUba)} XRP minimum fee — the facet mints nothing for it`,
+    `${show(amounts[small])} XRP is below the ${show(snap.fees.minimumFeeUba)} XRP minimum fee — the facet mints nothing for it`,
   );
 }
-const delay = ask(snap, sendUba);
+const delay = ask(snap, amounts[0]);
 
 console.log(`\n  core vault ${snap.coreVaultAddress}  tag ${tag}`);
 if (priced) console.log(`  invoice     ${priced}`);
-console.log(`  send        ${show(b.paidUba)} XRP`);
-console.log(`   ├ system fee   ${show(b.mintingFeeUba)}${b.mintingFeeUba === snap.fees.minimumFeeUba ? "  (the minimum, not the percentage)" : ""}`);
-console.log(`   ├ executor fee ${show(b.executorFeeUba)}`);
-console.log(`   └ merchant     ${show(b.netUba)} FXRP`);
+console.log(`  send        ${show(total.paidUba)} XRP${amounts.length > 1 ? ` in ${amounts.length} payments` : ""}`);
+console.log(`   ├ system fee   ${show(total.mintingFeeUba)}${pieces.every((p) => p.mintingFeeUba === snap.fees.minimumFeeUba) ? "  (the minimum, not the percentage)" : ""}`);
+console.log(`   ├ executor fee ${show(total.executorFeeUba)}${amounts.length > 1 ? `  (${amounts.length}x)` : ""}`);
+console.log(`   └ merchant     ${show(total.netUba)} FXRP`);
 console.log(
   delay.delayed
     ? `  execution   delayed ${delay.waitSeconds}s by the ${delay.reason} limit`
     : `  execution   allowed immediately`,
 );
 
-// One payment, or the split the planner recommends. Splitting is only worth it
-// above the large-minting cliff, and not always even then, so it is opt-in and
-// it prints the comparison first.
-let amounts = [sendUba];
-if (ARGS.includes("--split")) {
+if (wantSplit) {
   const cmp = comparePlans(snap, sendUba / snap.granularityUba, snap.now);
-  amounts = splitAmounts(snap, sendUba / snap.granularityUba, snap.now).map(
-    (amg) => amg * snap.granularityUba,
-  );
+  const one = fees(sendUba, snap.fees);
   console.log(`\n  split into ${amounts.length}: ${amounts.map(show).join(" + ")} XRP`);
   console.log(
     cmp.splitWins
@@ -91,13 +113,10 @@ if (ARGS.includes("--split")) {
   );
   // Speed is not free. Each piece is charged separately, and the minimum system
   // fee applies per piece, so the planner's "no later" is only half the answer.
-  const cost = amounts.reduce((a, x) => {
-    const f = fees(x, snap.fees);
-    return a + f.mintingFeeUba + f.executorFeeUba;
-  }, 0n);
-  const one = b.mintingFeeUba + b.executorFeeUba;
+  const cost = total.mintingFeeUba + total.executorFeeUba;
+  const oneCost = one.mintingFeeUba + one.executorFeeUba;
   console.log(
-    `  fees ${show(one)} -> ${show(cost)} XRP (${cost > one ? "+" : ""}${show(cost - one)}) — each piece is charged separately`,
+    `  fees ${show(oneCost)} -> ${show(cost)} XRP (${cost > oneCost ? "+" : ""}${show(cost - oneCost)}) — each piece is charged separately`,
   );
   // The plan assumes the pieces are recorded in this order. Order at the vault
   // is ours, order of execution is not — a competing executor finalising the

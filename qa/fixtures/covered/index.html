@@ -26,6 +26,11 @@
   <thead><tr><th>Window</th><th>Limit</th></tr></thead>
   <tbody><tr><td colspan="2">reading chain…</td></tr></tbody>
 </table>
+<!-- and a number that failed to compute but renders like any other -->
+<table id="wrong">
+  <thead><tr><th>Fee</th></tr></thead>
+  <tbody><tr><td>$NaN</td></tr></tbody>
+</table>
 <script>
   const c = document.getElementById("plate");
   const g = c.getContext("2d");

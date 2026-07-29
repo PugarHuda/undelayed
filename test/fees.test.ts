@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fees, invoice, usdToUba, type FeeConfig } from "../src/fees.js";
+import { fees, invoice, invoiceSplit, usdToUba, type FeeConfig } from "../src/fees.js";
 
 const XRP = 1_000_000n;
 
@@ -90,6 +90,61 @@ test("invoice minimality holds across a dense sweep, not just chosen points", ()
     assert.equal(inv.netUba >= want, true, `want ${want}`);
     assert.equal(fees(inv.paidUba - 1n, cfg).netUba < want, true, `want ${want} not minimal`);
   }
+});
+
+test("a split invoice covers the fees of every piece, not of one payment", () => {
+  // Cut at a fixed ceiling, the shape the large-mint cliff forces.
+  const cutAt = (cap: bigint) => (gross: bigint) => {
+    const out: bigint[] = [];
+    let left = gross;
+    while (left > 0n) {
+      const take = left > cap ? cap : left;
+      out.push(take);
+      left -= take;
+    }
+    return out;
+  };
+
+  for (const cfg of [COSTON2, FLARE]) {
+    for (const [want, cap] of [
+      [120_000n * XRP, 99_999_999_999n],
+      [1_000n * XRP, 100n * XRP],
+      [37n * XRP, 5n * XRP], // many small pieces: the minimum fee dominates each
+      [XRP, XRP * 10n], // fits in one piece, must match plain invoice()
+    ] as const) {
+      const r = invoiceSplit(want, cfg, cutAt(cap));
+      const where = `want ${want} cap ${cap} at ${cfg.feeBips} bips`;
+      assert.equal(r.netUba >= want, true, `${where}: nets ${r.netUba}`);
+      assert.equal(r.paidUba, r.amounts.reduce((a, b) => a + b, 0n), `${where}: sum`);
+      assert.equal(r.pieces.every((p) => !p.tooSmall), true, `${where}: a piece is below the minimum fee`);
+    }
+  }
+
+  // The bug this replaces: grossing up once and then splitting leaves the
+  // merchant short by the extra pieces' fees.
+  const naive = invoice(120_000n * XRP, COSTON2).paidUba;
+  const pieces = cutAt(99_999_999_999n)(naive).map((a) => fees(a, COSTON2));
+  const naiveNet = pieces.reduce((a, p) => a + p.netUba, 0n);
+  assert.equal(naiveNet < 120_000n * XRP, true, "the naive route should underpay");
+  assert.equal(120_000n * XRP - naiveNet, COSTON2.executorFeeUba - 1n, "short by the extra executor fee");
+});
+
+test("splitting into many small pieces cannot drive a piece under the minimum fee", () => {
+  // 0.25 XRP pieces where the minimum fee is 0.1: legal, but the merchant only
+  // keeps 0.05 of each. The invoice has to gross up enormously, and it does.
+  const r = invoiceSplit(10n * XRP, COSTON2, (gross) => {
+    const cap = XRP / 4n;
+    const out: bigint[] = [];
+    let left = gross;
+    while (left > 0n) {
+      const take = left > cap ? cap : left;
+      out.push(take);
+      left -= take;
+    }
+    return out;
+  });
+  assert.equal(r.netUba >= 10n * XRP, true, `nets ${r.netUba}`);
+  assert.equal(r.paidUba > 30n * XRP, true, "fees should dominate at this piece size");
 });
 
 test("a USD price becomes XRP, rounded so the merchant is never short", () => {
