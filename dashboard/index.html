@@ -259,7 +259,17 @@ function render() {
 
 function simulate() {
   const xrp = Number($("amount").value);
-  if (!Number.isFinite(xrp) || xrp <= 0) return;
+  if (!Number.isFinite(xrp) || xrp <= 0) {
+    // Same rule as the checkout: no answer beats last week's answer.
+    const el = $("verdict");
+    el.classList.remove("ok");
+    el.textContent = $("amount").value.trim()
+      ? `"${$("amount").value.trim()}" is not an amount of XRP.`
+      : "Enter an amount in XRP.";
+    $("price").textContent = "";
+    $("split-wrap").hidden = true;
+    return;
+  }
   const uba = BigInt(Math.round(xrp * Number(XRP)));
   const p = predict(snap, uba / snap.granularityUba, snap.now);
   const el = $("verdict");
@@ -296,7 +306,16 @@ function simulate() {
 function priceIt() {
   const usd = Number($("usd").value);
   const body = $("invoice").querySelector("tbody");
-  if (!Number.isFinite(usd) || usd <= 0) return;
+  // Returning early used to leave the last good answer on screen: a real number,
+  // correct for a price nobody had typed. A populated table is a claim that the
+  // figure in it answers the question in the box, so when it cannot, it empties.
+  if (!Number.isFinite(usd) || usd <= 0) {
+    body.innerHTML = "";
+    $("inv-note").textContent = $("usd").value.trim()
+      ? `"${$("usd").value.trim()}" is not a price — enter an amount in dollars.`
+      : "Enter a price in dollars.";
+    return;
+  }
   if (!snap.priceUsd) {
     body.innerHTML = "";
     $("inv-note").textContent = "No XRP/USD feed on this network right now, so there is no honest price to show.";
