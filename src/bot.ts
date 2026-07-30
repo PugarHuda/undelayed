@@ -23,6 +23,7 @@ import { predict } from "./limiter.js";
 import { fees } from "./fees.js";
 import { decide } from "./decide.js";
 import { attemptPayment, type Entry as AttemptEntry } from "./attempt.js";
+import { Ledger, importLegacyState } from "./ledger.js";
 import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
 
 const XRPL_RPC = {
@@ -44,10 +45,15 @@ const STATE_FILE = fileURLToPath(new URL(`../bot-state.${network}.json`, import.
 // One definition, in attempt.ts, because two copies of the state shape drift and
 // the drift shows up as a type error at best and a lost proof at worst.
 type Entry = AttemptEntry;
-const state: Record<string, Entry> = existsSync(STATE_FILE)
-  ? JSON.parse(readFileSync(STATE_FILE, "utf8"))
-  : {};
-const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+// One file per payment, in a directory, so more than one executor can run.
+// The old single-file state let two processes each see "no request yet" and each
+// buy an attestation, and let whichever saved second erase the other's record of
+// a proof it had already paid for. Imported once so an upgrade does not re-buy
+// everything the previous version owned.
+const LEDGER_DIR = fileURLToPath(new URL(`../ledger.${network}/`, import.meta.url));
+const ledger = new Ledger(LEDGER_DIR, process.env.EXECUTOR_ID ?? `pid-${process.pid}`);
+const migrated = importLegacyState(ledger, STATE_FILE);
+if (migrated) console.log(`imported ${migrated} payment(s) from ${STATE_FILE}`);
 
 const EXECUTE_ABI = parseAbi([
   "struct RequestBody { bytes32 transactionId; address proofOwner; }",
@@ -105,7 +111,12 @@ async function tick() {
   for (const p of payments) {
     const tag = BigInt(p.tx.DestinationTag);
     const txId = `0x${p.hash}`.toLowerCase() as `0x${string}`;
-    if (state[txId]?.done) continue;
+    const held = ledger.claim(txId);
+    if (!held.ok) {
+      // Another executor has it, or it is finished. Either way, not ours.
+      continue;
+    }
+    const entry = held.entry;
     if (wantedTags && !wantedTags.includes(tag)) continue;
 
     const [recipient, executor] = await Promise.all([
@@ -129,14 +140,13 @@ async function tick() {
       exclusiveFor: snap.othersCanExecuteAfterSeconds,
       delayState: delayState as 0 | 1 | 2,
       allowedAt,
-      finished: Boolean(state[txId]?.done),
+      finished: Boolean(entry.done),
     });
     if (call.action === "skip") {
       continue;
     }
     if (call.action === "wait") {
-      state[txId] = { ...state[txId], allowedAt: Number(call.until) };
-      save();
+      ledger.save(txId, { ...entry, allowedAt: Number(call.until) });
       console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${call.why} — waiting until ${new Date(Number(call.until) * 1000).toISOString().slice(11, 19)}, not retrying`);
       continue;
     }
@@ -151,7 +161,7 @@ async function tick() {
     // That sequence lives in attempt.ts, where it can be tested without a chain
     // — it is the part where being wrong costs money.
     const say = (m: string) => console.log(`  ${txId.slice(0, 12)} tag ${tag}: ${m}`);
-    const res = await attemptPayment(state[txId] ?? {}, amount, snap.fees, {
+    const res = await attemptPayment(entry, amount, snap.fees, {
       requestProof: async () => {
         const request = await prepareRequest(network, txId);
         const sub = await submitRequest(network, request);
@@ -178,10 +188,7 @@ async function tick() {
         await pc.waitForTransactionReceipt({ hash: h });
         return h;
       },
-      save: (e) => {
-        state[txId] = { ...e, tag: String(tag) };
-        save();
-      },
+      save: (e) => ledger.save(txId, { ...e, tag: String(tag) }),
       log: say,
     });
     if (res.outcome !== "won") continue;
@@ -202,14 +209,16 @@ async function tick() {
  * "this is worth running".
  */
 async function report() {
-  const rows = Object.entries(state);
-  const won = rows.filter(([, e]) => e.outcome === "won");
-  const lost = rows.filter(([, e]) => e.outcome === "lost");
-  const pending = rows.filter(([, e]) => !e.done);
+  // Totals come from the shared directory, so two executors serving different
+  // tags still add up to one business rather than two half-answers.
+  const t = ledger.totals();
+  const won = { length: t.won };
+  const lost = { length: t.lost };
+  const pending = { length: t.pending };
   // Entries finished before the bot started labelling outcomes. Counting them
   // as neither is honest; counting them as wins would not be.
-  const unlabelled = rows.filter(([, e]) => e.done && !e.outcome);
-  const earned = won.reduce((a, [, e]) => a + BigInt(e.feeUba ?? 0), 0n);
+  const unlabelled = { length: t.unlabelled };
+  const earned = t.earnedUba;
 
   console.log(`\n  executor report — ${network}`);
   console.log(`  won      ${won.length}`);

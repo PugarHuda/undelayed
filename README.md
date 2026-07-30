@@ -130,6 +130,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/fdc.ts` | The FDC round trip: prepare, request, wait for the round, pull the proof. |
 | `src/prove.ts` | `npm run prove -- <xrplTxHash>` — dry run one payment end to end. |
 | `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price — including when the payment will be split. |
+| `src/ledger.ts` | Shared state for more than one executor: one file per payment, claimed by creating it. Two processes cannot both buy a proof for the same payment, and a crashed worker's claim is taken over after ten minutes without losing the proof it paid for. |
 | `src/attempt.ts` | One payment from decision to outcome: buy the proof once, retire a lost race, record the fee actually paid. Injected dependencies, so the sequence that costs money has tests. |
 | `src/decide.ts` | What the executor should do about one payment, as a pure function: execute, wait, or skip. Extracted so the part that spends money can be tested. |
 | `src/economics.ts` | Whether running an executor pays. Measured gas, live prices, and the win rate it takes to break even. |
@@ -138,6 +139,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
 | `parity/` | The real Solidity limiter, and the harness that proves we match it. |
 | `qa/flows.mjs` | `npm run qa:flows` — drives the page: prices a basket, splits a mint, then feeds every input garbage, negatives, zero, empty, 1e999. A form that keeps its last good answer for a question nobody asked is the bug it exists to catch. |
+| `qa/visual.mjs` | `npm run qa:visual` — pixel diff against committed baselines. Catches what the DOM cannot: a colour token that stops resolving, a font that fails to subset, a border that vanishes. Volatile numbers are overwritten rather than hidden, because hiding them also hid the colours. |
 | `qa/flows-landing.mjs` | The landing page's sealed-bid demo, which nothing exercised before: five bids sealed, one winner revealed, four still sealed, and the clearing price pinned to the runner-up's. A first-price mutation renders identically and this is what catches it. |
 | `qa/flows-desk.mjs` | The same for the Buta desk, where the honest-offline state is the happy path. |
 | `qa/render.mjs` | `npm run qa` — Chromium and WebKit, failing on console errors, horizontal overflow, a `100dvh` that disagrees with the viewport, **text painted over by something opaque**, and **panels still showing their loading text**. It runs a deliberately broken fixture first and fails if that page comes back clean. |
