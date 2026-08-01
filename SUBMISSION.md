@@ -167,10 +167,14 @@ Contracts used (all Flare's own, resolved through the ContractRegistry at
 
 ## Roadmap
 
-1. **Executor as a service.** Multiple tags, competitive fee accounting, and a
-   published record of which payments an executor finalised and how late.
+1. **Executor as a service.** The shared ledger already lets several processes
+   run without buying the same proof twice, and totals the books across them.
+   What is missing is a published record — which payments an executor finalised
+   and how late — so a merchant can choose one on evidence.
 2. **Merchant SDK.** Drop-in checkout that shows the customer a real completion
    estimate — "your FXRP arrives in about 40 minutes" — instead of a spinner.
-3. **Execute the split, not just plan it.** `src/plan.ts` computes the schedule;
-   the merchant still sends the payments by hand.
+3. **Split above the cliff, for real.** `npm run pay -- --split` sends the pieces
+   and prices the extra fees they cost, but the large-mint threshold is 100,000
+   XRP and the testnet faucet is not, so the case the planner exists for has only
+   ever been simulated.
 4. **Songbird and mainnet writes**, once the same rail is exercised there.
