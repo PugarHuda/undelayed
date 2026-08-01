@@ -10,7 +10,7 @@ Live dashboard: **https://undelayed.vercel.app**
 
 ```
 npm install
-npm test                              # 53 cases, including parity with the real contract
+npm test                              # 80 cases, including parity with the real contract
 npm run probe -- coston2 120000       # if I mint 120k XRP now, what happens?
 npm run probe -- flare 1000           # same question on mainnet
 ```
@@ -19,7 +19,7 @@ npm run probe -- flare 1000           # same question on mainnet
 
 `parity/` holds the verified Coston2 `MintingRateLimiter.sol`, copied byte for
 byte — the directory layout exists only so its own import paths resolve. A
-Foundry test runs it through 17 scenarios and writes down what it did;
+Foundry test runs it through 217 scenarios and writes down what it did;
 `test/parity.test.ts` replays the same steps in TypeScript and demands identical
 output: delayed flag, `allowedAt`, and both pieces of post-state.
 
