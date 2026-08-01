@@ -155,6 +155,12 @@ for (const vp of VIEWPORTS) {
         el.textContent = "00000000";
       }
     }
+    // #split-wrap appears only when the simulated mint is currently delayed,
+    // which depends on the live limiter — so its presence moves a few thousand
+    // pixels for the chain's reasons, not the page's. Whether it appears at all
+    // is covered by the flow checks, which is the right place for it.
+    const wrap = document.getElementById("split-wrap");
+    if (wrap) wrap.style.display = "none";
     // The WebGL plate never renders the same twice.
     for (const c of document.querySelectorAll("canvas")) c.style.visibility = "hidden";
   });
