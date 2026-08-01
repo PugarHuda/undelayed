@@ -18,6 +18,7 @@ import { Client, Wallet } from "xrpl";
 import { readLimits, xrpUsd, ask } from "./chain.js";
 import { fees, invoice, invoiceSplit, usdToUba } from "./fees.js";
 import { comparePlans, splitAmounts } from "./plan.js";
+import { checkoutLine } from "./estimate.js";
 import { parseTag, parseAmount } from "./args.js";
 
 const ARGS = process.argv.slice(2);
@@ -112,6 +113,10 @@ console.log(
     ? `  execution   delayed ${delay.waitSeconds}s by the ${delay.reason} limit`
     : `  execution   allowed immediately`,
 );
+// What a checkout would actually put under the pay button. "Allowed
+// immediately" is a fact about the limiter; the customer is also waiting on the
+// FDC round trip, and telling them "instant" would be a lie by omission.
+console.log(`  customer    ${checkoutLine(snap, amounts[0])}`);
 
 if (wantSplit) {
   const cmp = comparePlans(snap, sendUba / snap.granularityUba, snap.now);

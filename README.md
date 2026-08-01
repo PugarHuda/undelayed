@@ -130,6 +130,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/fdc.ts` | The FDC round trip: prepare, request, wait for the round, pull the proof. |
 | `src/prove.ts` | `npm run prove -- <xrplTxHash>` — dry run one payment end to end. |
 | `src/fees.ts` | What the merchant is actually credited, and what to invoice to net a price — including when the payment will be split. |
+| `src/estimate.ts` | What a checkout tells the customer: "arrives in a few minutes", or "in about 2 hours (large mintings are delayed by protocol)". Rounds up and speaks in bands — a merchant who promises four minutes and delivers seven has lied. |
 | `src/ledger.ts` | Shared state for more than one executor: one file per payment, claimed by creating it. Two processes cannot both buy a proof for the same payment, and a crashed worker's claim is taken over after ten minutes without losing the proof it paid for. |
 | `src/attempt.ts` | One payment from decision to outcome: buy the proof once, retire a lost race, record the fee actually paid. Injected dependencies, so the sequence that costs money has tests. |
 | `src/decide.ts` | What the executor should do about one payment, as a pure function: execute, wait, or skip. Extracted so the part that spends money can be tested. |

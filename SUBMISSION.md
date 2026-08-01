@@ -171,8 +171,10 @@ Contracts used (all Flare's own, resolved through the ContractRegistry at
    run without buying the same proof twice, and totals the books across them.
    What is missing is a published record — which payments an executor finalised
    and how late — so a merchant can choose one on evidence.
-2. **Merchant SDK.** Drop-in checkout that shows the customer a real completion
-   estimate — "your FXRP arrives in about 40 minutes" — instead of a spinner.
+2. **Merchant SDK.** `src/estimate.ts` answers the question a spinner dodges —
+   "arrives in a few minutes", or "in about 2 hours (large mintings are delayed
+   by protocol)" — and the checkout prints it. What is left is packaging: a
+   drop-in widget rather than a module a merchant has to wire up.
 3. **Split above the cliff, for real.** `npm run pay -- --split` sends the pieces
    and prices the extra fees they cost, but the large-mint threshold is 100,000
    XRP and the testnet faucet is not, so the case the planner exists for has only
