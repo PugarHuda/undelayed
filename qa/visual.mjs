@@ -133,6 +133,19 @@ for (const vp of VIEWPORTS) {
   await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
   await page.waitForTimeout(6000); // chain reads settle
 
+  // Put the simulator in a state the chain cannot change. #split-wrap only
+  // appears when the mint is delayed, and whether 120,000 XRP is delayed depends
+  // on the live limiter — so the panel came and went and moved thousands of
+  // pixels for reasons that had nothing to do with the page. Hiding it was the
+  // first fix and it was the wrong one: the check then never saw the split table
+  // at all. An amount at or above the large-mint threshold is ALWAYS delayed,
+  // whatever the limiter says, so the panel is always there and always compared.
+  const amount = await page.$("#amount");
+  if (amount) {
+    await amount.fill("999999999");
+    await page.waitForTimeout(500);
+  }
+
   // Volatile content is REPLACED, not hidden.
   //
   // Hiding it was the first attempt and it quietly gutted the check: the
@@ -155,12 +168,6 @@ for (const vp of VIEWPORTS) {
         el.textContent = "00000000";
       }
     }
-    // #split-wrap appears only when the simulated mint is currently delayed,
-    // which depends on the live limiter — so its presence moves a few thousand
-    // pixels for the chain's reasons, not the page's. Whether it appears at all
-    // is covered by the flow checks, which is the right place for it.
-    const wrap = document.getElementById("split-wrap");
-    if (wrap) wrap.style.display = "none";
     // The WebGL plate never renders the same twice.
     for (const c of document.querySelectorAll("canvas")) c.style.visibility = "hidden";
   });
