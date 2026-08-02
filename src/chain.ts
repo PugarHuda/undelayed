@@ -152,13 +152,7 @@ export async function readLimits(
     largeThresholdAmg: ubaToAmg(largeThresholdUba, granularityUba),
     largeDelaySeconds,
   };
-  for (const l of [limits.hourly, limits.daily]) {
-    if (l.windowStart % l.windowSizeSeconds !== 0n) {
-      throw new Error(
-        `window start ${l.windowStart} is not aligned to ${l.windowSizeSeconds}s — window size assumption is wrong`,
-      );
-    }
-  }
+  assertAligned(limits);
 
   return {
     ...limits,
@@ -262,5 +256,28 @@ export async function waitForOutcome(
     if (now >= o.allowedAt) return { ...o, state: "released" as DelayState };
     if (Date.now() > deadline) throw new Error(`still delayed until ${o.allowedAt}`);
     await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+/**
+ * The window sizes are fixed at initialization and never exposed by a getter, so
+ * HOUR and DAY above are an assumption. This is what stops that assumption from
+ * failing silently: the contract aligns `windowStart` to the window size, so a
+ * start that is not a multiple of the size we assumed means the size is wrong —
+ * and every prediction after it would be wrong too, quietly.
+ *
+ * Exported so it can be tested without a chain. It used to be inline in
+ * readLimits, where nothing could reach it.
+ */
+export function assertAligned(limits: Limits) {
+  for (const l of [limits.hourly, limits.daily]) {
+    if (l.windowSizeSeconds === 0n) {
+      throw new Error("window size is zero — a limiter cannot have one");
+    }
+    if (l.windowStart % l.windowSizeSeconds !== 0n) {
+      throw new Error(
+        `window start ${l.windowStart} is not aligned to ${l.windowSizeSeconds}s — window size assumption is wrong`,
+      );
+    }
   }
 }
