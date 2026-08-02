@@ -23,7 +23,7 @@ import { predict } from "./limiter.js";
 import { fees } from "./fees.js";
 import { decide } from "./decide.js";
 import { attemptPayment, type Entry as AttemptEntry } from "./attempt.js";
-import { Ledger, importLegacyState } from "./ledger.js";
+import { Ledger, importLegacyState, publicRecord } from "./ledger.js";
 import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
 
 const XRPL_RPC = {
@@ -264,7 +264,16 @@ async function report() {
   console.log();
 }
 
-if (ARGS.includes("--report")) {
+if (ARGS.includes("--publish")) {
+  // A record a merchant can read, not an operator dashboard. Losses included:
+  // an executor record that only lists wins is an advert.
+  const out = fileURLToPath(new URL(`../executor-record.${network}.json`, import.meta.url));
+  const me = process.env.EXECUTOR_ID ?? `pid-${process.pid}`;
+  const rec = publicRecord(ledger, me, network, new Date().toISOString());
+  writeFileSync(out, JSON.stringify(rec, null, 2) + "\n");
+  console.log(JSON.stringify(rec, null, 2));
+  console.log(`\nwritten to ${out}`);
+} else if (ARGS.includes("--report")) {
   await report();
 } else {
   await tick();

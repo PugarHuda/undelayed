@@ -169,8 +169,9 @@ Contracts used (all Flare's own, resolved through the ContractRegistry at
 
 1. **Executor as a service.** The shared ledger already lets several processes
    run without buying the same proof twice, and totals the books across them.
-   What is missing is a published record — which payments an executor finalised
-   and how late — so a merchant can choose one on evidence.
+   `npm run bot -- --publish` now emits that record — finalised, lost races,
+   outstanding, win rate and tags served. What is missing is publishing it
+   somewhere a merchant looks, and signing it so it cannot be edited.
 2. **Merchant SDK.** `src/estimate.ts` answers the question a spinner dodges —
    "arrives in a few minutes", or "in about 2 hours (large mintings are delayed
    by protocol)" — and the checkout prints it. What is left is packaging: a

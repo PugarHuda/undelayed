@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Ledger, importLegacyState, CLAIM_TTL_MS } from "../src/ledger.js";
+import { Ledger, importLegacyState, publicRecord, CLAIM_TTL_MS } from "../src/ledger.js";
 
 const TX = "0x6465efff817afd17cb68a3c7b59d9942678e1650c308e4d058755be7050ac07b";
 const TX2 = "0xdcd6e28b7218b454391505b0321e351cab839be6910025fcbe550e1680600a47";
@@ -121,5 +121,25 @@ test("a path that is not a transaction id is refused", () => {
   for (const bad of ["../escape", "0xshort", "", "0x" + "z".repeat(64)]) {
     assert.throws(() => l.claim(bad), /not a transaction id/, `accepted ${JSON.stringify(bad)}`);
   }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("the published record counts losses, and refuses a rate computed from nothing", () => {
+  const dir = fresh();
+  const a = new Ledger(dir, "worker-a");
+  a.claim(TX);
+  a.save(TX, { done: true, outcome: "won", feeUba: "100000", tag: "205" });
+  a.claim(TX2);
+  a.save(TX2, { done: true, outcome: "lost", tag: "206" });
+
+  const r = publicRecord(a, "0xexec", "coston2", "2026-08-02T00:00:00Z");
+  assert.equal(r.finalised, 1);
+  assert.equal(r.lostRaces, 1, "a record that hides losses is an advert");
+  assert.equal(r.winRatePct, 50);
+  assert.equal(r.earnedXrp, 0.1);
+  assert.deepEqual(r.tags, ["205", "206"]);
+
+  const empty = publicRecord(new Ledger(fresh(), "new"), "0xnew", "coston2", "now");
+  assert.equal(empty.winRatePct, null, "a rate from no data is a claim, not evidence");
   rmSync(dir, { recursive: true, force: true });
 });

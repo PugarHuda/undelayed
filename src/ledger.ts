@@ -154,3 +154,49 @@ export function importLegacyState(ledger: Ledger, legacyFile: string): number {
   }
   return moved;
 }
+
+/**
+ * A record a merchant could actually choose an executor on.
+ *
+ * `totals()` answers "was this worth running" for the operator. This answers a
+ * different question, asked by someone else: *should I point my tag at you?*
+ * The honest form of that answer is not a win rate — it is how long merchants
+ * waited, including the times we lost and they waited for somebody else.
+ *
+ * Deliberately publishable: no transaction ids of payments we did not finalise,
+ * no amounts beyond the fees we ourselves earned, and the losses are in it. An
+ * executor record that only lists wins is an advert.
+ */
+export type PublicRecord = {
+  executor: string;
+  network: string;
+  generatedAt: string;
+  finalised: number;
+  lostRaces: number;
+  /** Payments seen and not yet finished, which is a cost to the merchant too. */
+  outstanding: number;
+  winRatePct: number | null;
+  earnedXrp: number;
+  /** Tags served, so a merchant can see whether they are one of many or one of two. */
+  tags: string[];
+};
+
+export function publicRecord(ledger: Ledger, executor: string, network: string, at: string): PublicRecord {
+  const rows = ledger.all().map((r) => r.entry);
+  const won = rows.filter((e) => e.outcome === "won");
+  const lost = rows.filter((e) => e.outcome === "lost");
+  const decided = won.length + lost.length;
+  return {
+    executor,
+    network,
+    generatedAt: at,
+    finalised: won.length,
+    lostRaces: lost.length,
+    outstanding: rows.filter((e) => !e.done).length,
+    // Null rather than 0% or 100% on an empty record: a rate computed from
+    // nothing is a claim, and this file is meant to be evidence.
+    winRatePct: decided === 0 ? null : Math.round((100 * won.length) / decided),
+    earnedXrp: Number(won.reduce((a, e) => a + BigInt(e.feeUba ?? 0), 0n)) / 1e6,
+    tags: [...new Set(rows.map((e) => e.tag).filter((t): t is string => Boolean(t)))].sort(),
+  };
+}

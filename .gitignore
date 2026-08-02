@@ -30,3 +30,6 @@ ledger.*/
 # pixel-diff artefacts. The baselines ARE committed; the ".actual" ones are
 # what a failing run wrote for you to look at.
 qa/baseline/*.actual.png
+
+# published executor record: regenerate with `npm run bot -- --publish`
+executor-record.*.json
