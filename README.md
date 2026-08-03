@@ -10,7 +10,7 @@ Live dashboard: **https://undelayed.vercel.app**
 
 ```
 npm install
-npm test                              # 87 cases, including parity with the real contract
+npm test                              # 90 cases, including parity with the real contract
 npm run probe -- coston2 120000       # if I mint 120k XRP now, what happens?
 npm run probe -- flare 1000           # same question on mainnet
 ```
@@ -135,7 +135,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/attempt.ts` | One payment from decision to outcome: buy the proof once, retire a lost race, record the fee actually paid. Injected dependencies, so the sequence that costs money has tests. |
 | `src/decide.ts` | What the executor should do about one payment, as a pure function: execute, wait, or skip. Extracted so the part that spends money can be tested. |
 | `src/economics.ts` | Whether running an executor pays. Measured gas, live prices, and the win rate it takes to break even. |
-| `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books and the economics, `--publish` for a record a merchant could choose an executor on — losses included, because one that only lists wins is an advert. |
+| `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books and the economics, `--publish` for a record a merchant could choose an executor on, `--prune` to drop finished payments older than thirty days — losses included, because one that only lists wins is an advert. |
 | `src/pay.ts` | `npm run pay -- <tag> [xrp] [--usd n] [--net xrp] [--split] [--quote]` — the customer side. |
 | `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
 | `scripts/onchain-status.mjs` | `npm run status` — every claim the submission makes about the rail, read from public state. No key, and reading through src/chain.ts rather than re-encoding the calls, so if the script is right the product is too. |

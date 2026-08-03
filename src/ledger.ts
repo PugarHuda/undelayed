@@ -200,3 +200,35 @@ export function publicRecord(ledger: Ledger, executor: string, network: string, 
     tags: [...new Set(rows.map((e) => e.tag).filter((t): t is string => Boolean(t)))].sort(),
   };
 }
+
+/** How long a finished payment stays before pruning can remove it. */
+export const KEEP_FINISHED_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Remove finished payments older than the retention window.
+ *
+ * One file per payment is right and it grows without end. Not a problem yet —
+ * a busy executor might see a few thousand a year — but `all()` reads every one
+ * of them on every `--report`, so the cost is paid on each call rather than
+ * once.
+ *
+ * Only FINISHED entries are eligible, and that is the whole safety argument:
+ * pruning an unfinished payment would forget a proof we paid for, and the next
+ * tick would buy another. An entry still holding a request is never touched, no
+ * matter how old — a payment stuck for a month is a bug to look at, not
+ * rubbish to sweep up.
+ *
+ * Returns what it removed, so a caller can say so rather than delete quietly.
+ */
+export function prune(ledger: Ledger, olderThanMs = KEEP_FINISHED_MS, now = Date.now()): string[] {
+  const removed: string[] = [];
+  for (const { txId, entry } of ledger.all()) {
+    if (!entry.done) continue;
+    // No timestamp means it predates claim tracking. Keeping it costs one file.
+    if (!entry.claimedAt) continue;
+    if (now - entry.claimedAt < olderThanMs) continue;
+    ledger.release(txId);
+    removed.push(txId);
+  }
+  return removed;
+}

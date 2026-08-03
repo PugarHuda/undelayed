@@ -23,7 +23,7 @@ import { predict } from "./limiter.js";
 import { fees } from "./fees.js";
 import { decide } from "./decide.js";
 import { attemptPayment, type Entry as AttemptEntry } from "./attempt.js";
-import { Ledger, importLegacyState, publicRecord } from "./ledger.js";
+import { Ledger, importLegacyState, publicRecord, prune } from "./ledger.js";
 import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
 
 const XRPL_RPC = {
@@ -264,7 +264,12 @@ async function report() {
   console.log();
 }
 
-if (ARGS.includes("--publish")) {
+if (ARGS.includes("--prune")) {
+  // Finished payments only, older than thirty days. An unfinished one still
+  // holds a proof we paid for, so it is never eligible however old it is.
+  const gone = prune(ledger);
+  console.log(gone.length ? `pruned ${gone.length} finished payment(s)` : "nothing old enough to prune");
+} else if (ARGS.includes("--publish")) {
   // A record a merchant can read, not an operator dashboard. Losses included:
   // an executor record that only lists wins is an advert.
   const out = fileURLToPath(new URL(`../executor-record.${network}.json`, import.meta.url));

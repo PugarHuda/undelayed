@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Ledger, importLegacyState, publicRecord, CLAIM_TTL_MS } from "../src/ledger.js";
+import { Ledger, importLegacyState, publicRecord, prune, CLAIM_TTL_MS } from "../src/ledger.js";
 
 const TX = "0x6465efff817afd17cb68a3c7b59d9942678e1650c308e4d058755be7050ac07b";
 const TX2 = "0xdcd6e28b7218b454391505b0321e351cab839be6910025fcbe550e1680600a47";
@@ -141,5 +141,46 @@ test("the published record counts losses, and refuses a rate computed from nothi
 
   const empty = publicRecord(new Ledger(fresh(), "new"), "0xnew", "coston2", "now");
   assert.equal(empty.winRatePct, null, "a rate from no data is a claim, not evidence");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("pruning removes finished payments and never unfinished ones", () => {
+  const dir = fresh();
+  const l = new Ledger(dir, "worker-a");
+  const old = Date.now() - 40 * 24 * 60 * 60 * 1000;
+
+  l.claim(TX);
+  l.save(TX, { done: true, outcome: "won", feeUba: "100000" });
+  l.claim(TX2);
+  // Unfinished, and older than the window: it holds a proof we paid for, so
+  // removing it would make the next tick buy another.
+  l.save(TX2, { request: "0xpaidfor", votingRound: 1 });
+
+  for (const id of [TX, TX2]) {
+    const f = path.join(dir, `${id}.json`);
+    writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, "utf8")), claimedAt: old }));
+  }
+
+  const removed = prune(l);
+  assert.deepEqual(removed, [TX], "only the finished one may go");
+  assert.equal(l.read(TX), null);
+  assert.equal(l.read(TX2)?.request, "0xpaidfor", "an unfinished payment was pruned — its proof is now lost");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a recently finished payment is kept", () => {
+  const dir = fresh();
+  const l = new Ledger(dir, "worker-a");
+  l.claim(TX);
+  l.save(TX, { done: true, outcome: "won" });
+  assert.deepEqual(prune(l), [], "pruned something finished minutes ago");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("an entry with no timestamp is kept rather than guessed at", () => {
+  const dir = fresh();
+  const l = new Ledger(dir, "worker-a");
+  writeFileSync(path.join(dir, `${TX}.json`), JSON.stringify({ done: true, outcome: "won" }));
+  assert.deepEqual(prune(l), []);
   rmSync(dir, { recursive: true, force: true });
 });
