@@ -60,9 +60,14 @@ fs.mkdirSync(BASELINE, { recursive: true });
 
 const name = live ? new URL(target).hostname.split(".")[0] : path.basename(target);
 
+// Both themes. The page defines a full dark palette under
+// prefers-color-scheme, and forcing light meant half of it was never compared —
+// a colour that stops resolving in dark mode would have looked perfectly fine.
 const VIEWPORTS = [
-  { label: "desktop", width: 1440, height: 900 },
-  { label: "narrow", width: 390, height: 844 },
+  { label: "desktop", width: 1440, height: 900, scheme: "light" },
+  { label: "narrow", width: 390, height: 844, scheme: "light" },
+  { label: "desktop-dark", width: 1440, height: 900, scheme: "dark" },
+  { label: "narrow-dark", width: 390, height: 844, scheme: "dark" },
 ];
 
 /**
@@ -126,7 +131,7 @@ for (const vp of VIEWPORTS) {
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: 1,
     // Freeze what would otherwise differ every run.
-    colorScheme: "light",
+    colorScheme: vp.scheme ?? "light",
     reducedMotion: "reduce",
   });
   const page = await ctx.newPage();
@@ -157,7 +162,7 @@ for (const vp of VIEWPORTS) {
     const volatile = [
       "#limits tbody td", "#capacity", "#invoice tbody td", "#econ tbody td",
       "#split tbody td", "#addr", "#verdict", "#price", "#capnote",
-      "#stale-note", "#inv-note", "#econ-note", ".readout",
+      "#stale-note", "#inv-note", "#econ-note", "#customer-line", ".readout",
     ];
     for (const sel of volatile) {
       for (const el of document.querySelectorAll(sel)) {
