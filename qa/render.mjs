@@ -17,9 +17,10 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
-const pageDir = args.find((a) => !a.startsWith("--")) ?? new URL("../dashboard", import.meta.url).pathname.slice(1);
+const pageDir = args.find((a) => !a.startsWith("--")) ?? fileURLToPath(new URL("../dashboard", import.meta.url));
 const shotDir = args.includes("--shots") ? args[args.indexOf("--shots") + 1] : "qa/shots";
 
 let playwright;

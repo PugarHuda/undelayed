@@ -16,8 +16,12 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const target = process.argv[2] ?? new URL("../../buta/landing", import.meta.url).pathname.slice(1);
+// fileURLToPath, not .pathname — a URL percent-encodes the space in the repo
+// path, and the server then served a directory that does not exist. The page
+// came up empty and the run died on a 30s timeout rather than a failed check.
+const target = process.argv[2] ?? fileURLToPath(new URL("../../buta/landing", import.meta.url));
 const live = /^https?:\/\//.test(target);
 
 let playwright;
