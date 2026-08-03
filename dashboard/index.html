@@ -116,6 +116,7 @@
       <tbody></tbody>
     </table>
   </div>
+  <p class="big" id="customer-line" style="font-size:15px;margin:10px 0 0"></p>
   <p class="note" id="inv-note"></p>
 
   <div class="rule"></div>
@@ -148,6 +149,7 @@ import { advance, predict, undelayedCapacity } from "./limiter.js";
 import { comparePlans } from "./plan.js";
 import { fees, invoice, usdToUba } from "./fees.js";
 import { attempt, breakEvenWinRate, payingPayment, COSTON2_MEASURED } from "./economics.js";
+import { checkoutLine } from "./estimate.js";
 
 const NETS = {
   coston2: { rpc: "https://coston2-api.flare.network/ext/C/rpc", explorer: "https://coston2-explorer.flare.network" },
@@ -311,6 +313,7 @@ function priceIt() {
   // figure in it answers the question in the box, so when it cannot, it empties.
   if (!Number.isFinite(usd) || usd <= 0) {
     body.innerHTML = "";
+    $("customer-line").textContent = "";
     $("inv-note").textContent = $("usd").value.trim()
       ? `"${$("usd").value.trim()}" is not a price — enter an amount in dollars.`
       : "Enter a price in dollars.";
@@ -335,6 +338,10 @@ function priceIt() {
   ].map(([k, v, note]) => `<tr><td>${k}</td><td>${v < 0n ? "−" : ""}${fmt(v < 0n ? -v : v)}</td><td style="color:var(--dim)">${note}</td></tr>`).join("");
 
   const p = predict(snap, b.paidUba / g, snap.now);
+  // What the customer is told. "Executes immediately" is a fact about the
+  // limiter; the FDC round trip is 150 seconds on our own measurement, so the
+  // page must not imply instant.
+  $("customer-line").textContent = checkoutLine(snap, b.paidUba);
   $("inv-note").textContent =
     `Invoice the sticker price instead — ${fmt(want)} XRP — and the merchant is credited ${fmt(naive.netUba)}, ` +
     `short by ${fmt(short)} XRP on every sale. ` +

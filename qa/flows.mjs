@@ -96,6 +96,11 @@ async function run(page) {
     `${sends} - ${gets} != ${sysFee} + ${execFee}`,
   );
   check("checkout: the shortfall is explained", /short by/i.test(await page.textContent("#inv-note")));
+  // The line a customer reads. It must never say the payment is instant: the
+  // FDC round trip alone is 150 seconds.
+  const customer = (await page.textContent("#customer-line")) ?? "";
+  check("checkout: the customer is told when it arrives", /arrives/i.test(customer), customer);
+  check("checkout: nothing is promised as instant", !/instant|immediately/i.test(customer), customer);
 
   // Doubling the price should roughly double what is sent, not stay put.
   await type(page, "usd", "50");
