@@ -138,6 +138,7 @@ entirely. `NOTES.md` traces every one of these to the verified on-chain source.
 | `src/bot.ts` | `npm run bot` — the executor. `--report` for its own books and the economics, `--publish` for a record a merchant could choose an executor on — losses included, because one that only lists wins is an advert. |
 | `src/pay.ts` | `npm run pay -- <tag> [xrp] [--usd n] [--net xrp] [--split] [--quote]` — the customer side. |
 | `dashboard/` | One file, no build step. `npm run build:web` regenerates `limiter.js`, `plan.js` and `fees.js` from the same source the SDK uses, so the page cannot drift from the tests. |
+| `scripts/onchain-status.mjs` | `npm run status` — every claim the submission makes about the rail, read from public state. No key, and reading through src/chain.ts rather than re-encoding the calls, so if the script is right the product is too. |
 | `parity/` | The real Solidity limiter, and the harness that proves we match it. |
 | `qa/flows.mjs` | `npm run qa:flows` — drives the page: prices a basket, splits a mint, then feeds every input garbage, negatives, zero, empty, 1e999. A form that keeps its last good answer for a question nobody asked is the bug it exists to catch. |
 | `qa/visual.mjs` | `npm run qa:visual` — pixel diff against committed baselines. Catches what the DOM cannot: a colour token that stops resolving, a font that fails to subset, a border that vanishes. Volatile numbers are overwritten rather than hidden, because hiding them also hid the colours. |
