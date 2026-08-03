@@ -9,7 +9,8 @@
  */
 import { parseAbi } from "viem";
 import { prepareRequest, submitRequest, fetchProof } from "./fdc.js";
-import { client, readLimits, ask, type Network } from "./chain.js";
+import { client, readLimits, type Network } from "./chain.js";
+import { describe } from "./describe.js";
 
 const txId = process.argv[2];
 const network = (process.argv[3] ?? "coston2") as Network;
@@ -39,24 +40,28 @@ console.log(`  from ${body.sourceAddress}  received ${Number(body.receivedAmount
 console.log(`  destination tag ${body.hasDestinationTag ? body.destinationTag : "(none)"}` +
   `  memo ${body.hasMemoData ? body.firstMemoData.slice(0, 20) + "…" : "(none)"}`);
 
-// Who would receive the FXRP, per the official tag manager.
+// Who would receive the FXRP, per the official tag manager. The verdict itself
+// is describe(), which is pure and tested — this only fetches what it needs.
 const snap = await readLimits(network);
-let recipient = "(no registered tag — falls back to the memo payment reference)";
+let registered = null;
 if (body.hasDestinationTag) {
-  const registered = await client(network).readContract({
+  registered = await client(network).readContract({
     address: snap.mintingTagManager,
-    abi: parseAbi(["function mintingRecipient(uint256) view returns (address)"]),
-    functionName: "mintingRecipient",
+    abi: parseAbi(['function mintingRecipient(uint256) view returns (address)']),
+    functionName: 'mintingRecipient',
     args: [body.destinationTag],
   });
-  if (registered !== "0x0000000000000000000000000000000000000000") recipient = registered;
 }
-console.log(`  recipient: ${recipient}`);
 
-const a = ask(snap, BigInt(body.receivedAmount));
+const v = describe(proof, snap, registered);
+console.log(`  recipient: ${v.recipient}`);
+console.log(`  credited:  ${Number(v.netUba) / 1e6} FXRP of ${Number(v.receivedUba) / 1e6} XRP sent`);
 console.log(
-  `  rate limit: ` +
-    (a.delayed
-      ? `DELAYED by ${a.reason} for ${a.waitSeconds}s — do not retry before then`
-      : `clear, executes immediately`) + "\n",
+  "  rate limit: " +
+    (v.rejected
+      ? "REJECTED — below the minimum fee, this mints nothing"
+      : v.delayed
+        ? `DELAYED by ${v.reason} for ${v.waitSeconds}s — do not retry before then`
+        : "clear, executes immediately"),
 );
+console.log(`  customer:  ${v.text}\n`);
