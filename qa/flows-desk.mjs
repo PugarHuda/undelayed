@@ -45,7 +45,20 @@ await page.waitForTimeout(5000);
 const body = (await page.textContent("body")) ?? "";
 
 // ---- happy path: the offline state is stated, not implied -------------------
-check("desk says the extension is offline", /extension offline/i.test(body));
+// The masthead used to say EXTENSION OFFLINE whenever this browser could not
+// reach a proxy, which conflated two different facts. The machine is registered
+// and PRODUCTION on Coston2; not being able to reach it from a browser is a
+// separate thing, and the page has to say which is which.
+check(
+  "desk states the TEE state it can actually read from the chain",
+  /tee\s+production|extension offline/i.test(body),
+  body.slice(0, 80),
+);
+check(
+  "desk does not claim the extension is unregistered while it is in production",
+  !/tee\s+production/i.test(body) || !/extension offline/i.test(body),
+  "the masthead says both PRODUCTION and OFFLINE",
+);
 check("desk says the data is demo data", /demo data/i.test(body));
 check("desk says how to get the live flow", /go run \.\/cmd\/dev/i.test(body));
 
