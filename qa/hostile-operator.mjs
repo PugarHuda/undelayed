@@ -15,6 +15,7 @@
  */
 import http from "node:http";
 import { chromium } from "playwright";
+import { installWallet, connect } from "./wallet.mjs";
 
 const CASES = {
   "negative and absurd numbers": [
@@ -30,16 +31,46 @@ const CASES = {
   "not an array": { rfqId: 1 },
 };
 
+// The receipts path, which Portfolio renders with .slice() on the commitment.
+// Guarding the book and leaving this raw was half a fix.
+const BID_CASES = {
+  "receipt with no commitment": [{ rfqId: 1, pair: "A/B", cleared: false, won: false }],
+  "receipt commitment is a number": [{ rfqId: 1, pair: "A/B", commitment: 5, cleared: false, won: false }],
+  "receipts are not an array": { rfqId: 1 },
+};
+
 const b32 = (s) => "0x" + Buffer.from(s).toString("hex").padEnd(64, "0");
 let payload = [];
+let bidPayload = [];
+const asked = new Map();
 const srv = http.createServer((req, res) => {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-headers", "*");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
   if (req.url === "/info") return res.end(JSON.stringify({ machineData: { publicKey: { x: "0x" + "11".repeat(32), y: "0x" + "22".repeat(32) } } }));
-  if (req.url === "/direct") { req.resume(); return res.end(JSON.stringify({ data: { id: "0x" + "ab".repeat(32) } })); }
-  const hex = "0x" + Buffer.from(JSON.stringify(payload)).toString("hex");
-  res.end(JSON.stringify({ result: { id: "0x00", submissionTag: "submit", status: 1, log: "ok", opType: b32("BUTA"), opCommand: b32("LIST_RFQS"), data: hex } }));
+  // Remember which command each action id was for, so the result answers the
+  // question that was actually asked — the book and the receipts are different
+  // read paths and were guarded at different times.
+  if (req.url === "/direct") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      let cmd = "LIST_RFQS";
+      try {
+        cmd = Buffer.from(JSON.parse(body).opCommand.slice(2), "hex").toString().replace(/\0+$/, "");
+      } catch {
+        /* the desk copes or a check says so */
+      }
+      const id = "0x" + (asked.size + 1).toString(16).padStart(64, "0");
+      asked.set(id, cmd);
+      res.end(JSON.stringify({ data: { id } }));
+    });
+  }
+  const id = (req.url.match(/result\/(0x[0-9a-f]+)/) || [])[1] ?? "";
+  const cmd = asked.get(id) ?? "LIST_RFQS";
+  const data = cmd === "GET_MY_BIDS" ? bidPayload : payload;
+  const hex = "0x" + Buffer.from(JSON.stringify(data)).toString("hex");
+  res.end(JSON.stringify({ result: { id: "0x00", submissionTag: "submit", status: 1, log: "ok", opType: b32("BUTA"), opCommand: b32(cmd), data: hex } }));
 });
 await new Promise((r) => srv.listen(6699, "127.0.0.1", r));
 
@@ -67,9 +98,40 @@ for (const [name, data] of Object.entries(CASES)) {
   if (why.length) failures.push(`${name}: ${why.join(", ")}`);
   await ctx.close();
 }
+// The receipts, which only render once a wallet is connected — so this half
+// needs one. The book stays well-formed here so that anything that breaks is
+// the receipt path and not the book path.
+payload = [
+  { rfqId: 1, maker: "0x1111111111111111111111111111111111111111", pair: "A/B", lot: 10, deadline: 99, bidCount: 0, cleared: false },
+];
+for (const [name, data] of Object.entries(BID_CASES)) {
+  bidPayload = data;
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const w = await installWallet(ctx);
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on("pageerror", (e) => errs.push(String(e).split("\n")[0].slice(0, 90)));
+  await p.goto(process.argv[2] ?? "http://localhost:5175/dashboard/", { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
+  await p.waitForTimeout(4000);
+  await connect(p, w);
+  const folio = p.locator("button", { hasText: /^▸? ?portfolio$/i }).first();
+  if (await folio.count()) {
+    await folio.click().catch(() => {});
+    await p.waitForTimeout(2500);
+  }
+  const t = await p.evaluate(() => (document.body.innerText || "").replace(/\s+/g, " "));
+  const why = [];
+  if (errs.length) why.push(`threw: ${errs[0]}`);
+  if (/NaN|undefined|\[object/i.test(t)) why.push(`rendered ${(t.match(/NaN|undefined|\[object \w+/i) || [""])[0]}`);
+  if (t.trim().length < 30) why.push("blank page");
+  checks++;
+  if (why.length) failures.push(`${name}: ${why.join(", ")}`);
+  await ctx.close();
+}
+
 await browser.close();
 srv.close();
 
-console.log(`\n${checks} hostile books, ${failures.length} got through`);
+console.log(`\n${checks} hostile responses, ${failures.length} got through`);
 for (const f of failures) console.log(`  FAIL  ${f}`);
 process.exit(failures.length ? 1 : 0);
