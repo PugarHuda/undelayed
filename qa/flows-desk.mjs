@@ -331,6 +331,35 @@ if (filled) {
     "no minutes-to-block conversion shown",
   );
 
+  // Two rails. The direct one is the demo path; on-chain is a transaction that
+  // escrows the lot, and only that one makes the commitment set the clearing
+  // has to match. The form offered no choice at all.
+  check(
+    "the form offers both rails",
+    /direct \(demo\)/i.test(formText) && /on-chain/i.test(formText),
+    "only one rail offered",
+  );
+  check(
+    "and says what the direct one does not do",
+    /nothing is escrowed/i.test(formText),
+    "the demo rail does not admit it escrows nothing",
+  );
+  const chainRail = page.locator("button", { hasText: /^on-chain$/i }).first();
+  if (await chainRail.count()) {
+    await chainRail.click();
+    await page.waitForTimeout(400);
+    const onChainText = (await page.textContent("body")) ?? "";
+    check(
+      "picking the on-chain rail says what it will cost you",
+      /escrowed/i.test(onChainText) && /approval/i.test(onChainText),
+      "no mention of escrow or approval",
+    );
+    // Back to direct: the garbage-input loop below posts, and a transaction
+    // prompt is not what it is testing.
+    await page.locator("button", { hasText: /direct \(demo\)/i }).first().click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
   const action = page.locator("button", { hasText: /^post block/i }).last();
 
   // The right answer to "post a block with no wallet" is to ask for a wallet.
