@@ -422,8 +422,15 @@ check(
 
 if (connected) {
   // A cleared auction is closed to bids, and the first row usually is one — the
-  // form only exists on a SEALED auction, so pick one of those.
-  const sealed = page.locator("button", { hasText: /FXRP\// }).filter({ hasText: /SEALED/i }).first();
+  // form only exists on a SEALED auction, so pick one of those. And not one
+  // this wallet has already bid on: the enclave accepts one bid per address, so
+  // running the suite twice against the same stack would otherwise fail on the
+  // second run for being correct.
+  const sealed = page
+    .locator("button", { hasText: /FXRP\// })
+    .filter({ hasText: /SEALED/i })
+    .filter({ hasNotText: /BID SEALED/i })
+    .first();
   check("there is a sealed auction to bid on", (await sealed.count()) > 0);
   if (await sealed.count()) {
     await sealed.click();
@@ -444,7 +451,12 @@ if (connected) {
 
     // The amount is parsed with BigInt. Anything that is not a whole number
     // throws, and the throw has to become a message rather than a dead button.
-    for (const bad of ["abc", "1.5", "-3", "0", "", "1e9", "0x10", " 12 "]) {
+    // " 12 " was in this list and does not belong: the desk trims before it
+    // parses, so a padded number is a VALID bid — and it sealed one, which made
+    // the honest bid below the second from this address and correctly refused.
+    // A wrong-path list with a right-path value in it does not just under-test,
+    // it breaks the checks that come after.
+    for (const bad of ["abc", "1.5", "-3", "0", "", "1e9", "0x10", "  ", "12.0"]) {
       await bidField.fill(bad);
       await seal.click({ timeout: 4000 }).catch(() => {});
       await page.waitForTimeout(700);
@@ -484,7 +496,7 @@ if (connected) {
       check(
         "happy path: a valid bid against a live enclave is sealed and receipted",
         /you are bid #/i.test(after) && /nonce/i.test(after),
-        after.slice(0, 120),
+        (after.match(/>>>[^]{0,150}/) || [after.slice(0, 120)])[0],
       );
     }
     // Selective disclosure is the sharpest thing the desk does, and it was
@@ -520,6 +532,41 @@ if (connected) {
             /^0x[0-9a-f]{64}$/i.test(filled),
             `nonce field holds ${JSON.stringify(filled.slice(0, 20))}`,
           );
+
+          // The whole point of the product, driven once: build a disclosure and
+          // verify it. Nothing had ever run this, and it did not work — an
+          // honest disclosure came back NOT VERIFIED.
+          const verdictText = async () =>
+            (await page.evaluate(() =>
+              [...document.querySelectorAll("span")]
+                .map((s) => (s.textContent || "").trim())
+                .find((t) => /^VERIFIED|^NOT VERIFIED/.test(t)) ?? "",
+            )) || "";
+
+          await page.locator("button", { hasText: /build disclosure/i }).first().click().catch(() => {});
+          await page.waitForTimeout(700);
+          const proof = await page.locator("textarea").first().inputValue().catch(() => "");
+          check("a disclosure is built from the seal", proof.trim().startsWith("{"), proof.slice(0, 60));
+
+          await page.locator("button", { hasText: /^verify$/i }).first().click().catch(() => {});
+          await page.waitForTimeout(4500);
+          const honest = await verdictText();
+          check("an honest disclosure verifies", /^VERIFIED/.test(honest), honest.slice(0, 90));
+          check(
+            "and the verdict names the amount it proved",
+            /\d/.test(honest),
+            "verified without saying what was proved",
+          );
+
+          // Tampered: the same nonce with a different amount produces a
+          // different commitment, so the discloser cannot lie about their bid.
+          if (proof.trim().startsWith("{")) {
+            await page.locator("textarea").first().fill(proof.replace(/"amount":"\d+"/, '"amount":"999999999"'));
+            await page.locator("button", { hasText: /^verify$/i }).first().click().catch(() => {});
+            await page.waitForTimeout(4500);
+            const lied = await verdictText();
+            check("a tampered disclosure does not", /^NOT VERIFIED/.test(lied), lied.slice(0, 90));
+          }
         }
         const bookTab = page.locator("button", { hasText: /^▸? ?book$/i }).first();
         if (await bookTab.count()) {
