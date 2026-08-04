@@ -18,7 +18,8 @@
     "qa:live": "node qa/render.mjs https://undelayed.vercel.app && node qa/render.mjs https://buta-desk.vercel.app && node qa/render.mjs https://buta-app.vercel.app && node qa/flows.mjs https://undelayed.vercel.app && node qa/flows-landing.mjs https://buta-desk.vercel.app && node qa/flows-desk.mjs",
     "test": "tsx --test test/*.test.ts",
     "qa:visual": "node qa/visual.mjs dashboard && node qa/visual.mjs ../buta/landing",
-    "status": "tsx scripts/onchain-status.mjs"
+    "status": "tsx scripts/onchain-status.mjs",
+    "verify:submission": "tsx qa/verify-submission.mjs"
   },
   "dependencies": {
     "viem": "^2.21.0",
