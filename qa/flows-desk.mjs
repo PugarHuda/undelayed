@@ -3,14 +3,18 @@
  *
  *   node qa/flows-desk.mjs [url]        default: https://buta-desk.vercel.app/dashboard
  *
- * The desk has no backend a browser can reach in production, so the happy path
- * here is the honest-offline one: the page says the book is a demo, shows it
- * anyway, and every control that cannot work
- * without a wallet or an extension says so instead of pretending.
+ * Runs against either kind of desk and checks the one it found.
  *
- * That is worth checking precisely BECAUSE it is the fallback. A judge opening
- * the link sees this and nothing else, and a fallback nobody exercises is a
- * fallback that quietly rots.
+ * The deployed desk has no backend a browser can reach, so its happy path is
+ * the honest-offline one: it says the book is a demo, shows it anyway, and
+ * every control that cannot work says so instead of pretending. That is worth
+ * checking precisely BECAUSE it is the fallback — a judge opening the link sees
+ * this and nothing else, and a fallback nobody exercises quietly rots.
+ *
+ * Point it at a local stack and the live branches run instead: a bid really is
+ * sealed, the receipt really is kept, and the disclosure form really is filled
+ * from it. Which branch applies is decided by whether an enclave answered, not
+ * by what the page says about itself.
  */
 let playwright;
 try {
@@ -40,16 +44,30 @@ const pageErrors = [];
 const requests = [];
 page.on("pageerror", (e) => pageErrors.push(String(e).slice(0, 140)));
 page.on("request", (r) => requests.push(r.url()));
+// Responses too: whether an enclave answered is the only honest way to know if
+// this desk is live, and the page saying so is not evidence of it.
+const replies = [];
+page.on("response", (r) => replies.push({ url: r.url(), ok: r.ok() }));
 
 await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
 await page.waitForTimeout(5000);
 
 const body = (await page.textContent("body")) ?? "";
 
-// Whether this desk has a backend behind it. The deployed one does not, and a
-// few checks below only make sense in one case or the other — asserting the
-// offline behaviour against a healthy local stack would fail for being healthy.
-const onDemo = /demo book/i.test(body);
+// Whether this desk has a backend behind it — decided by whether an enclave
+// actually answered, not by whether the page says so. Reading it off the banner
+// made the banner check a tautology: the desk was asked to admit it was on demo
+// data, and the evidence for the question was the admission itself.
+const liveBackend = replies.some((r) => /\/direct$/.test(r.url) && r.ok);
+const onDemo = !liveBackend;
+
+// Now it can be checked in both directions. A desk with no enclave must say the
+// book is a demo; a desk with one must not.
+check(
+  onDemo ? "desk admits the book is a demo when nothing answered" : "desk does not cry demo while an enclave is answering",
+  onDemo === /demo book/i.test(body),
+  `banner ${/demo book/i.test(body) ? "shown" : "absent"}, backend ${liveBackend ? "live" : "unreachable"}`,
+);
 
 // ---- wrong path: it must not poll an endpoint that cannot answer ------------
 //
@@ -88,8 +106,10 @@ check(
   !/tee\s+production/i.test(body) || !/extension offline/i.test(body),
   "the masthead says both PRODUCTION and OFFLINE",
 );
-check("desk says the book is not live data", /demo book/i.test(body));
-check("desk says how to get the live flow", /go run \.\/cmd\/dev/i.test(body));
+// Only the offline desk needs to say this, and only the offline desk can — the
+// line lives in the demo banner. Asserting it against a live stack fails for
+// the desk being live.
+if (onDemo) check("desk says how to get the live flow", /go run \.\/cmd\/dev/i.test(body));
 
 // ---- happy path: there is still a book, and it is readable ------------------
 const rows = await page.evaluate(() =>
@@ -208,11 +228,18 @@ if (await clearedRow.count()) {
 }
 
 // ---- happy path: selecting an auction opens it ------------------------------
-const firstRow = page.locator("button", { hasText: /FXRP\// }).first();
-await firstRow.click();
+//
+// The SECOND row, not the first. The desk opens with the first open auction
+// already selected, so clicking that one changes nothing and the check passed
+// or failed on the accident of which auction happened to be on top.
+const rowLocator = page.locator("button", { hasText: /FXRP\// });
+const rowTotal = await rowLocator.count();
+const target = rowLocator.nth(rowTotal > 1 ? 1 : 0);
+const beforeSelect = (await page.textContent("body")) ?? "";
+await target.click();
 await page.waitForTimeout(800);
 const afterSelect = (await page.textContent("body")) ?? "";
-check("selecting an auction changes the page", afterSelect !== body);
+check("selecting a different auction changes the page", afterSelect !== beforeSelect, `${rowTotal} rows`);
 
 // ---- wrong path: no wallet, so the actions must refuse, not throw -----------
 //
@@ -420,6 +447,48 @@ if (connected) {
         after.slice(0, 120),
       );
     }
+    // Selective disclosure is the sharpest thing the desk does, and it was
+    // unusable: building one needs the amount and the 32-byte nonce from the
+    // moment you sealed, and the desk showed them once in a panel that vanished
+    // on the next render. Sealing has to leave something behind that Portfolio
+    // can offer back, or the feature exists only on paper.
+    if (!onDemo) {
+      const folioTab = page.locator("button", { hasText: /^▸? ?portfolio$/i }).first();
+      if (await folioTab.count()) {
+        await folioTab.click();
+        await page.waitForTimeout(1200);
+        const folio = (await page.textContent("body")) ?? "";
+        check(
+          "sealing left a receipt Portfolio can use",
+          /your seals, kept in this browser/i.test(folio),
+          "no stored seals after sealing a bid",
+        );
+        check(
+          "and it says plainly where they are kept",
+          /in this browser/i.test(folio) && /forget them/i.test(folio),
+          "stored a secret without saying so or offering to drop it",
+        );
+        // One click has to fill the disclosure form — that is the whole point.
+        const use = page.locator("button", { hasText: /use this/i }).first();
+        if (await use.count()) {
+          await use.click();
+          await page.waitForTimeout(500);
+          const nonceField = page.locator("label", { hasText: /nonce/i }).locator("input").first();
+          const filled = (await nonceField.inputValue().catch(() => "")) || "";
+          check(
+            "picking a seal fills the nonce, so nobody has to copy 32 bytes by hand",
+            /^0x[0-9a-f]{64}$/i.test(filled),
+            `nonce field holds ${JSON.stringify(filled.slice(0, 20))}`,
+          );
+        }
+        const bookTab = page.locator("button", { hasText: /^▸? ?book$/i }).first();
+        if (await bookTab.count()) {
+          await bookTab.click();
+          await page.waitForTimeout(500);
+        }
+      }
+    }
+
     check(
       "wrong path: the button is not left spinning",
       (await seal.isEnabled().catch(() => true)) === true,
