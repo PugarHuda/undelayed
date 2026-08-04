@@ -1,7 +1,7 @@
 /**
  * Flow checks for the Buta desk.
  *
- *   node qa/flows-desk.mjs [url]        default: https://buta-app.vercel.app
+ *   node qa/flows-desk.mjs [url]        default: https://buta-desk.vercel.app/dashboard
  *
  * The desk has no backend in production — no TEE machine is registered for the
  * extension — so the happy path here is the honest-offline one: the page says
@@ -22,7 +22,7 @@ try {
 const { chromium } = playwright;
 const { installWallet, connect } = await import("./wallet.mjs");
 
-const url = process.argv[2] ?? "https://buta-app.vercel.app";
+const url = process.argv[2] ?? "https://buta-desk.vercel.app/dashboard";
 
 const failures = [];
 let checks = 0;

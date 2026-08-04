@@ -1,7 +1,7 @@
 /**
  * Flow checks for the Buta landing page's sealed-bid demo.
  *
- *   node qa/flows-landing.mjs [pageDir|url]     default: ../buta/landing
+ *   node qa/flows-landing.mjs [pageDir|url]     default: ../buta/frontend/landing
  *
  * This is the interaction a judge actually clicks, and until now nothing
  * exercised it. render.mjs loads the page and checks it is not visibly broken;
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 // fileURLToPath, not .pathname — a URL percent-encodes the space in the repo
 // path, and the server then served a directory that does not exist. The page
 // came up empty and the run died on a 30s timeout rather than a failed check.
-const target = process.argv[2] ?? fileURLToPath(new URL("../../buta/landing", import.meta.url));
+const target = process.argv[2] ?? fileURLToPath(new URL("../../buta/frontend/landing", import.meta.url));
 const live = /^https?:\/\//.test(target);
 
 let playwright;
