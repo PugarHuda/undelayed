@@ -11,6 +11,10 @@
  * checking precisely BECAUSE it is the fallback — a judge opening the link sees
  * this and nothing else, and a fallback nobody exercises quietly rots.
  *
+ * Build the static bundle with VITE_TEE_PROXY_URL= — .env.local otherwise bakes
+ * a localhost proxy into it, which is not what deploys, and which silently
+ * turned the no-polling check off on every local run.
+ *
  * Point it at a local stack and the live branches run instead: a bid really is
  * sealed, the receipt really is kept, and the disclosure form really is filled
  * from it. Which branch applies is decided by whether an enclave answered, not
@@ -542,6 +546,37 @@ check(
   foreign.length === 0,
   [...new Set(foreign)].slice(0, 3).join(", "),
 );
+
+// ---- wrong path: a wallet on the wrong network ------------------------------
+//
+// The bid signature is domain-separated by chain id. A wallet on any other
+// network signs a payload the enclave cannot match, so the bid comes back
+// rejected as a forged sender — and the connect button hides the network, so
+// the failure reads as the desk being broken. The desk signed a hardcoded 114
+// regardless, which made this silent in both directions.
+//
+// A second context, because the wallet's chain is fixed when it is installed.
+{
+  const other = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const wrongWallet = await installWallet(other, { chainId: 1 });
+  const wrongPage = await other.newPage();
+  await wrongPage.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
+  await wrongPage.waitForTimeout(5000);
+  await connect(wrongPage, wrongWallet);
+  await wrongPage.waitForTimeout(800);
+  const text = (await wrongPage.textContent("body")) ?? "";
+  check(
+    "wrong path: a wallet on another chain is told so before it bids",
+    /not coston2/i.test(text),
+    text.slice(0, 80),
+  );
+  check(
+    "wrong path: and the desk names the chain it is actually on",
+    /chain 1\b/.test(text),
+    "did not say which chain the wallet is on",
+  );
+  await other.close();
+}
 
 await browser.close();
 
