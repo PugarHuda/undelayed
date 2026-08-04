@@ -58,7 +58,14 @@ function serve(root) {
 const BASELINE = fileURLToPath(new URL("./baseline/", import.meta.url));
 fs.mkdirSync(BASELINE, { recursive: true });
 
-const name = live ? new URL(target).hostname.split(".")[0] : path.basename(target);
+// --name, because a URL gives a useless one: everything served locally is
+// "localhost", so two different pages would overwrite each other's baselines.
+const named = args.find((a) => a.startsWith("--name="));
+const name = named
+  ? named.slice("--name=".length)
+  : live
+    ? new URL(target).hostname.split(".")[0]
+    : path.basename(target);
 
 // Both themes. The page defines a full dark palette under
 // prefers-color-scheme, and forcing light meant half of it was never compared —
@@ -163,6 +170,11 @@ for (const vp of VIEWPORTS) {
       "#limits tbody td", "#capacity", "#invoice tbody td", "#econ tbody td",
       "#split tbody td", "#addr", "#verdict", "#price", "#capnote",
       "#stale-note", "#inv-note", "#econ-note", "#customer-line", ".readout",
+      // Anything a component marks itself. The desk's deadlines and countdowns
+      // move with the chain's head, and naming them by selector here would put
+      // that knowledge in the wrong file — the component knows what is volatile
+      // about it, and a renamed class would silently stop masking.
+      "[data-volatile]",
     ];
     for (const sel of volatile) {
       for (const el of document.querySelectorAll(sel)) {

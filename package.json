@@ -19,7 +19,8 @@
     "test": "tsx --test test/*.test.ts",
     "qa:visual": "node qa/visual.mjs dashboard && node qa/visual.mjs ../buta/landing",
     "status": "tsx scripts/onchain-status.mjs",
-    "verify:submission": "tsx qa/verify-submission.mjs"
+    "verify:submission": "tsx qa/verify-submission.mjs",
+    "qa:visual:desk": "node qa/visual.mjs http://localhost:4192/dashboard/ --name=desk"
   },
   "dependencies": {
     "viem": "^2.21.0",
