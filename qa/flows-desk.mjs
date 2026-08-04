@@ -153,6 +153,30 @@ check(
   /computed here, not sent/i.test(body),
 );
 
+// Every receipt the desk hands back used to overwrite the previous one, so
+// clearing an auction erased the outcome of the last one you cleared. They are
+// kept now, and the panel exists whether or not anything has happened yet.
+const activityTab = page.locator("button", { hasText: /^▸? ?activity$/i }).first();
+check("there is somewhere the session's receipts are kept", (await activityTab.count()) > 0);
+if (await activityTab.count()) {
+  await activityTab.click();
+  await page.waitForTimeout(600);
+  const act = (await page.textContent("body")) ?? "";
+  check("the activity panel names itself", /this session/i.test(act), act.slice(0, 60));
+  check(
+    "and an empty one says what would fill it",
+    /nothing yet|post a block|seal a bid/i.test(act),
+    "empty with no explanation",
+  );
+  // Back to the book — everything after this needs rows.
+  const bookTab = page.locator("button", { hasText: /^▸? ?book$/i }).first();
+  if (await bookTab.count()) {
+    await bookTab.click();
+    await page.waitForTimeout(500);
+  }
+  check("and the book is still there afterwards", (await page.locator("button", { hasText: /FXRP\// }).count()) > 0);
+}
+
 // ---- wrong path: a cleared auction offers a way on, not a dead end ----------
 const clearedRow = page.locator("button", { hasText: /FXRP\// }).filter({ hasText: /CLEARED/i }).first();
 if (await clearedRow.count()) {
@@ -257,7 +281,21 @@ if (filled) {
   await page.waitForTimeout(500);
   check("wrong path: the wallet prompt closes again", (await page.locator("[data-rk] [role=dialog]").count()) === 0);
 
+  // A post that SUCCEEDS closes the form and goes back to the book — which is
+  // right, and which the loop below did not expect. Against a live enclave the
+  // first click really does post, so the form has to be reopened before each
+  // attempt rather than assumed to still be sitting there.
+  const ensurePostForm = async () => {
+    if (await page.locator("label", { hasText: "Lot (base units)" }).count()) return;
+    const b = page.locator("button", { hasText: /post a block/i }).first();
+    if (await b.count()) {
+      await b.click().catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  };
+
   for (const bad of ["abc", "-1", "0", "", "1e999", "  "]) {
+    await ensurePostForm();
     await fillByLabel("Lot (base units)", bad);
     await fillByLabel("Deadline block", bad);
     // Assert the field really took the value, so a fill that silently failed
