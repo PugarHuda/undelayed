@@ -3,9 +3,9 @@
  *
  *   node qa/flows-desk.mjs [url]        default: https://buta-desk.vercel.app/dashboard
  *
- * The desk has no backend in production — no TEE machine is registered for the
- * extension — so the happy path here is the honest-offline one: the page says
- * it is on demo data, shows a book anyway, and every control that cannot work
+ * The desk has no backend a browser can reach in production, so the happy path
+ * here is the honest-offline one: the page says the book is a demo, shows it
+ * anyway, and every control that cannot work
  * without a wallet or an extension says so instead of pretending.
  *
  * That is worth checking precisely BECAUSE it is the fallback. A judge opening
@@ -49,7 +49,7 @@ const body = (await page.textContent("body")) ?? "";
 // Whether this desk has a backend behind it. The deployed one does not, and a
 // few checks below only make sense in one case or the other — asserting the
 // offline behaviour against a healthy local stack would fail for being healthy.
-const onDemo = /demo data/i.test(body);
+const onDemo = /demo book/i.test(body);
 
 // ---- wrong path: it must not poll an endpoint that cannot answer ------------
 //
@@ -88,7 +88,7 @@ check(
   !/tee\s+production/i.test(body) || !/extension offline/i.test(body),
   "the masthead says both PRODUCTION and OFFLINE",
 );
-check("desk says the data is demo data", /demo data/i.test(body));
+check("desk says the book is not live data", /demo book/i.test(body));
 check("desk says how to get the live flow", /go run \.\/cmd\/dev/i.test(body));
 
 // ---- happy path: there is still a book, and it is readable ------------------
@@ -117,9 +117,40 @@ check(
   "landed on a closed auction",
 );
 check("the state of the desk is stated in counts", /open/i.test(body) && /sealed bids/i.test(body));
+
+// A deadline is a block number, which is not a time to anyone. The desk reads
+// the chain's head and says what it means — and the clearing control used to
+// ask "Past the deadline?", a question it was in a position to answer.
+check(
+  "a deadline is expressed as time, not only as a block number",
+  /left\b|deadline passed/i.test(body),
+  "no countdown anywhere on the page",
+);
+check(
+  "the desk no longer asks the reader whether the deadline has passed",
+  !/past the deadline\?/i.test(body),
+  "still asking",
+);
+check(
+  "and it states which side of the deadline this auction is on",
+  /can be cleared now|not until block/i.test(body),
+  body.slice(0, 60),
+);
 check(
   "posting is offered without a selection",
   (await page.locator("button", { hasText: /post a block/i }).count()) > 0,
+);
+// Every panel names itself. A screen that opens with a table and no heading
+// makes the reader work out where they are from the contents.
+check("the book says what it is", /open blocks/i.test(body));
+check(
+  "the bid form lists what has to be true before anything is sealed",
+  /before it leaves this browser/i.test(body),
+  "no preconditions shown",
+);
+check(
+  "and it says the commitment is computed here rather than sent",
+  /computed here, not sent/i.test(body),
 );
 
 // ---- wrong path: a cleared auction offers a way on, not a dead end ----------
@@ -134,6 +165,22 @@ if (await clearedRow.count()) {
   check("a cleared auction opens its receipt", /clearing price/i.test(onCleared), onCleared.slice(0, 80));
   check("the receipt names the second price as the rule", /vickrey second price/i.test(onCleared));
   check("and says what stayed sealed", /sealed forever/i.test(onCleared));
+  // "3 bids" is a number you take on trust. The commitments are public by
+  // construction — the contract records each one before anyone knows what is in
+  // it — so the receipt lists them. That list is the claim made visible, and it
+  // is the first thing that would quietly vanish if the field stopped arriving.
+  check(
+    "the receipt lists the sealed bids, not just how many",
+    // No \b after the digit: the commitment follows it immediately once the
+    // markup is flattened to text, and "1f" has no word boundary in it.
+    /bid 1/i.test(onCleared),
+    "no commitment list in the receipt",
+  );
+  check(
+    "and no amount is printed beside any of them",
+    !/amount[^s]*[:=]\s*\d/i.test(onCleared),
+    onCleared.slice(0, 60),
+  );
 }
 
 // ---- happy path: selecting an auction opens it ------------------------------
