@@ -291,6 +291,42 @@ const filled = await fillByLabel("Lot (base units)", "120000");
 check("wrong path: the post form is reachable", filled, "no Lot field found");
 
 if (filled) {
+  // The form offers both shapes of the product. An invited auction with one
+  // sealed bid IS a bilateral settle — same commitment, same digest — and the
+  // UI used to hide that as an optional field below the deadline.
+  const formText = (await page.textContent("body")) ?? "";
+  check(
+    "the post form offers both ways to clear",
+    /open auction/i.test(formText) && /one counterparty/i.test(formText),
+    "only one shape offered",
+  );
+  check(
+    "the counterparty field appears only when it is needed",
+    (await page.locator("label", { hasText: /^the counterparty/i }).count()) === 0,
+    "asking for a counterparty on an open auction",
+  );
+  const bilateralCard = page.locator("button", { hasText: /one counterparty/i }).first();
+  if (await bilateralCard.count()) {
+    await bilateralCard.click();
+    await page.waitForTimeout(400);
+    check(
+      "choosing a counterparty asks for one",
+      (await page.locator("label", { hasText: /^the counterparty/i }).count()) > 0,
+    );
+    await page.locator("button", { hasText: /open auction/i }).first().click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
+
+  // The deadline is asked in minutes and shown as the block it becomes. It used
+  // to ask for the block directly, with a placeholder nine million blocks behind
+  // the chain — anyone following the example posted an auction whose deadline
+  // had already passed.
+  check(
+    "the deadline is asked in minutes and shown as the block it becomes",
+    /open for \(minutes\)/i.test(formText) && /deadline is block/i.test(formText),
+    "no minutes-to-block conversion shown",
+  );
+
   const action = page.locator("button", { hasText: /^post block/i }).last();
 
   // The right answer to "post a block with no wallet" is to ask for a wallet.
@@ -324,7 +360,7 @@ if (filled) {
   for (const bad of ["abc", "-1", "0", "", "1e999", "  "]) {
     await ensurePostForm();
     await fillByLabel("Lot (base units)", bad);
-    await fillByLabel("Deadline block", bad);
+    await fillByLabel("Open for (minutes)", bad);
     // Assert the field really took the value, so a fill that silently failed
     // cannot be mistaken for a form that handled it.
     const got = await page
