@@ -20,7 +20,8 @@
     "qa:visual": "node qa/visual.mjs dashboard && node qa/visual.mjs ../buta/landing",
     "status": "tsx scripts/onchain-status.mjs",
     "verify:submission": "tsx qa/verify-submission.mjs",
-    "qa:visual:desk": "node qa/visual.mjs http://localhost:4192/dashboard/ --name=desk"
+    "qa:visual:desk": "node qa/visual.mjs http://localhost:4192/dashboard/ --name=desk",
+    "qa:hostile": "node qa/hostile-operator.mjs"
   },
   "dependencies": {
     "viem": "^2.21.0",
