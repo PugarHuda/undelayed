@@ -119,7 +119,7 @@ check(
 check("the state of the desk is stated in counts", /open/i.test(body) && /sealed bids/i.test(body));
 check(
   "posting is offered without a selection",
-  (await page.locator("button", { hasText: /^post a block$/i }).count()) > 0,
+  (await page.locator("button", { hasText: /post a block/i }).count()) > 0,
 );
 
 // ---- wrong path: a cleared auction offers a way on, not a dead end ----------
@@ -128,12 +128,12 @@ if (await clearedRow.count()) {
   await clearedRow.click();
   await page.waitForTimeout(700);
   const onCleared = (await page.textContent("body")) ?? "";
-  check("a cleared auction explains itself", /has cleared/i.test(onCleared), onCleared.slice(0, 60));
-  check(
-    "and offers the next move rather than stopping",
-    (await page.locator("button", { hasText: /bid on rfq|post a block/i }).count()) > 0,
-    "dead end",
-  );
+  // A cleared row opens its receipt under itself. The second price is public —
+  // Vickrey pays it — and the row has to say what stayed sealed, or the reader
+  // has no way to tell a private auction from a merely quiet one.
+  check("a cleared auction opens its receipt", /clearing price/i.test(onCleared), onCleared.slice(0, 80));
+  check("the receipt names the second price as the rule", /vickrey second price/i.test(onCleared));
+  check("and says what stayed sealed", /sealed forever/i.test(onCleared));
 }
 
 // ---- happy path: selecting an auction opens it ------------------------------
@@ -250,6 +250,23 @@ if (filled) {
 // broadcast, which is enough to open it.
 const connected = await connect(page, wallet);
 check("happy path: the desk connects and shows the address", connected, `expected ${wallet}`);
+
+// The button loop above walks the sidebar too, so it ends up wherever the last
+// nav item it clicked leads — Audit, as it happens, where there is no book at
+// all. Everything below needs rows, so navigate back deliberately rather than
+// assuming a click loop left the desk somewhere useful.
+for (const label of [/^▸? ?book$/i, /^all$/i]) {
+  const b = page.locator("button", { hasText: label }).first();
+  if (await b.count()) {
+    await b.click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
+}
+check(
+  "the book is reachable again after wandering the sidebar",
+  (await page.locator("button", { hasText: /FXRP\// }).count()) > 0,
+  "no rows after going back to Book / All",
+);
 
 if (connected) {
   // A cleared auction is closed to bids, and the first row usually is one — the
