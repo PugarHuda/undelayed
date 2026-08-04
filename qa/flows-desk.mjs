@@ -100,6 +100,42 @@ const rows = await page.evaluate(() =>
 check("desk shows a book rather than an empty screen", rows >= 3, `${rows} rows`);
 check("the book states each auction's state", /SEALED|CLEARED/i.test(body));
 
+// ---- happy path: the desk is usable before anything is clicked --------------
+//
+// It used to open on a three-tab strip with nothing selected, so the first
+// thing anyone saw was "Select an auction on the left to bid on it" — and the
+// top row is usually a CLEARED auction, which led to a dead end. The desk now
+// selects the first OPEN auction itself. These run before any click, on purpose.
+check(
+  "the bid form is on screen without anyone selecting anything",
+  /your bid/i.test(body),
+  "no bid form on load",
+);
+check(
+  "the desk did not open on a cleared auction",
+  !/has cleared, so its book is closed/i.test(body),
+  "landed on a closed auction",
+);
+check("the state of the desk is stated in counts", /open/i.test(body) && /sealed bids/i.test(body));
+check(
+  "posting is offered without a selection",
+  (await page.locator("button", { hasText: /^post a block$/i }).count()) > 0,
+);
+
+// ---- wrong path: a cleared auction offers a way on, not a dead end ----------
+const clearedRow = page.locator("button", { hasText: /FXRP\// }).filter({ hasText: /CLEARED/i }).first();
+if (await clearedRow.count()) {
+  await clearedRow.click();
+  await page.waitForTimeout(700);
+  const onCleared = (await page.textContent("body")) ?? "";
+  check("a cleared auction explains itself", /has cleared/i.test(onCleared), onCleared.slice(0, 60));
+  check(
+    "and offers the next move rather than stopping",
+    (await page.locator("button", { hasText: /bid on rfq|post a block/i }).count()) > 0,
+    "dead end",
+  );
+}
+
 // ---- happy path: selecting an auction opens it ------------------------------
 const firstRow = page.locator("button", { hasText: /FXRP\// }).first();
 await firstRow.click();
