@@ -325,6 +325,19 @@ if (filled) {
   // to ask for the block directly, with a placeholder nine million blocks behind
   // the chain — anyone following the example posted an auction whose deadline
   // had already passed.
+  // A block posted with no reserve gives the lot away: clearing floors AT the
+  // reserve, so a single bid takes it for nothing. The field was optional and
+  // said nothing about that — this is the check that it now refuses.
+  await fillByLabel("Hidden reserve (quote units)", "");
+  await page.locator("button", { hasText: /^post block$/i }).last().click({ timeout: 4000 }).catch(() => {});
+  await page.waitForTimeout(900);
+  check(
+    "wrong path: a block with no reserve is refused, and says why",
+    /gives the lot away|reserve above zero/i.test((await page.textContent("body")) ?? ""),
+    "posted with a zero floor without a word",
+  );
+  await fillByLabel("Hidden reserve (quote units)", "90000");
+
   check(
     "the deadline is asked in minutes and shown as the block it becomes",
     /open for \(minutes\)/i.test(formText) && /deadline is block/i.test(formText),
