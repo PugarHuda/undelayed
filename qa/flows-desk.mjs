@@ -177,6 +177,21 @@ check(
   /computed here, not sent/i.test(body),
 );
 
+// Both rails for a bid, not just the demo one. The direct channel records the
+// commitment in enclave memory; only a commitBid transaction puts it in the set
+// relayClearing checks a clearing against, so a bid that never reached the chain
+// can demonstrate the mechanism but never complete a settlement.
+check(
+  "a bid can be sealed on-chain, not only over the demo channel",
+  /seal on-chain instead/i.test(body),
+  "only the direct rail is offered for bidding",
+);
+check(
+  "and it says why that rail is the one that counts",
+  /set the clearing has to match/i.test(body),
+  "no reason given for choosing it",
+);
+
 // Every receipt the desk hands back used to overwrite the previous one, so
 // clearing an auction erased the outcome of the last one you cleared. They are
 // kept now, and the panel exists whether or not anything has happened yet.
