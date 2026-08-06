@@ -203,6 +203,14 @@ async function run(page) {
 
 // ── driver ───────────────────────────────────────────────────────────────────
 
+// Run from the wrong directory, `dashboard` resolves to nothing, the server
+// answers every request with a 404, and the first check fails as
+// "waiting for locator('#usd')" — which points at the page instead of at the
+// path. Say which it is.
+if (!live && !fs.existsSync(path.join(target, "index.html"))) {
+  console.error(`no index.html under ${path.resolve(target)} — run this from the repo root`);
+  process.exit(2);
+}
 const { s, port } = live ? { s: { close() {} }, port: 0 } : await serve(target);
 const url = live ? target : `http://127.0.0.1:${port}/index.html`;
 

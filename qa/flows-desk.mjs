@@ -740,6 +740,61 @@ check(
   await other.close();
 }
 
+// ---- an unfunded wallet is told, not charged --------------------------------
+//
+// The whole point of the pre-flight: the first postRfq on Coston2 failed on
+// "ERC20: insufficient allowance", and the only way to learn that was to pay
+// for a reverted transaction. The test wallet holds no FXRP, so the on-chain
+// rail must end in a sentence rather than a signature request.
+//
+// A fresh page: the loops above leave the desk wherever their last click went.
+{
+  const p2 = await ctx.newPage();
+  await p2.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
+  await p2.waitForTimeout(4000);
+  await connect(p2, wallet);
+  await p2.waitForTimeout(800);
+
+  const open = p2.locator("button", { hasText: /post a block/i }).first();
+  if (await open.count()) {
+    await open.click().catch(() => {});
+    await p2.waitForTimeout(600);
+  }
+  const rail = p2.locator("button", { hasText: /^on-chain$/i }).first();
+  check("the on-chain rail is offered to a connected wallet", (await rail.count()) > 0);
+
+  if (await rail.count()) {
+    await rail.click();
+    await p2.waitForTimeout(300);
+    // The reserve too. Without it the desk stops at "set a reserve above zero"
+    // — which is correct, and which meant this check never reached the
+    // pre-flight it was written to test.
+    for (const [label, value] of [
+      ["Lot (base units)", "5000000"],
+      ["Hidden reserve (quote units)", "1000000"],
+      ["Open for (minutes)", "10"],
+    ]) {
+      const input = p2.locator("label", { hasText: label }).locator("input").first();
+      if (await input.count()) await input.fill(value);
+    }
+    await p2.locator("button", { hasText: /^post block/i }).last().click({ timeout: 4000 }).catch(() => {});
+    // Reads against a public RPC, so give it longer than a render.
+    await p2.waitForTimeout(6000);
+    const t = (await p2.textContent("body")) ?? "";
+    check(
+      "wrong path: a wallet with no FXRP is told what it holds, not asked to sign",
+      /cannot post on-chain/i.test(t) && /you hold/i.test(t),
+      t.match(/cannot post[^.]*\./i)?.[0] ?? "no pre-flight message",
+    );
+    check(
+      "wrong path: and no signature was ever requested for a transaction that would revert",
+      (await p2.locator("[data-rk] [role=dialog]").count()) === 0,
+      "a wallet dialog opened anyway",
+    );
+  }
+  await p2.close();
+}
+
 await browser.close();
 
 console.log(`\n${checks} checks, ${failures.length} failed`);

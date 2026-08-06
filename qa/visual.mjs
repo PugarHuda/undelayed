@@ -121,6 +121,15 @@ async function diffCount(page, aB64, bB64) {
   );
 }
 
+// A missing directory is not a failed comparison, it is a broken command. The
+// server answers a 404 with a blank page, which diffs at 100% against every
+// baseline and reads as "the landing page changed completely" — the landing
+// target had in fact moved to frontend/landing and this said nothing useful
+// about it for as long as it was wrong.
+if (!live && !fs.existsSync(path.join(target, "index.html"))) {
+  console.error(`no index.html under ${path.resolve(target)} — nothing to compare`);
+  process.exit(2);
+}
 const { s, port } = live ? { s: { close() {} }, port: 0 } : await serve(target);
 const url = live ? target : `http://127.0.0.1:${port}/index.html`;
 
