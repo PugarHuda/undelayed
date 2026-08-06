@@ -207,6 +207,50 @@ if (await activityTab.count()) {
     /nothing yet|post a block|seal a bid/i.test(act),
     "empty with no explanation",
   );
+}
+
+// ---- the address every on-chain action goes to ------------------------------
+//
+// It was a constant, and it stayed at the FIRST of four deployments while three
+// later ones were live. A stale address does not throw: it reverts every
+// transaction against a contract nothing is bound to any more. The desk asks the
+// diamond now, so this checks the desk agrees with the chain rather than with
+// whatever was typed into it.
+{
+  const auditTab = page.locator("button", { hasText: /^▸? ?audit$/i }).first();
+  if (await auditTab.count()) {
+    await auditTab.click();
+    await page.waitForTimeout(2500);
+    const shown = ((await page.textContent("body")) ?? "").match(/0x[0-9a-fA-F]{40}/g) ?? [];
+    // Read from NODE, not from the page. Doing it in the browser meant a CORS
+    // failure returned null, and `!live ||` then passed the check — putting the
+    // stale constant back left it green, which is the whole thing it exists to
+    // catch. Here a failed read is a failed check.
+    const live = await (async () => {
+      const r = await fetch("https://coston2-api.flare.network/ext/C/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{
+            to: "0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE",
+            // getTeeExtensionInstructionsSender(uint256), extension 65642.
+            // Computed with toFunctionSelector, not guessed — a guessed one
+            // returns 0x and this check would pass on nothing.
+            data: "0x2c177358" + (65642).toString(16).padStart(64, "0"),
+          }, "latest"],
+        }),
+      }).catch(() => null);
+      if (!r?.ok) return null;
+      const j = await r.json();
+      return j.result && j.result !== "0x" ? "0x" + j.result.slice(-40) : null;
+    })();
+    check(
+      "the desk's Audit panel names the contract the diamond is actually bound to",
+      !!live && shown.some((a) => a.toLowerCase() === live.toLowerCase()),
+      `diamond says ${live}, panel shows ${shown.slice(0, 4).join(", ")}`,
+    );
+  }
   // Back to the book — everything after this needs rows.
   const bookTab = page.locator("button", { hasText: /^▸? ?book$/i }).first();
   if (await bookTab.count()) {
