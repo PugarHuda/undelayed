@@ -177,6 +177,20 @@ check(
   /computed here, not sent/i.test(body),
 );
 
+// Clearing has two rails too, and only one of them can end in a settlement.
+// The direct channel is refused by a production stack and its facade signs
+// nothing, so a clearing taken that way is one relayClearing will never accept.
+check(
+  "a clearing can be requested on-chain, not only over the demo channel",
+  /request clearing on-chain/i.test(body),
+  "no on-chain clearing offered",
+);
+check(
+  "and the desk says why only a signed one can be settled",
+  /only a signed one can be settled/i.test(body),
+  "no reason given",
+);
+
 // Both rails for a bid, not just the demo one. The direct channel records the
 // commitment in enclave memory; only a commitBid transaction puts it in the set
 // relayClearing checks a clearing against, so a bid that never reached the chain
