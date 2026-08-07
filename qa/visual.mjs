@@ -46,7 +46,15 @@ function serve(root) {
   return new Promise((resolve) => {
     const s = http.createServer((req, res) => {
       const p = path.join(root, decodeURIComponent(req.url.split("?")[0]));
-      const f = fs.existsSync(p) && fs.statSync(p).isFile() ? p : path.join(root, "index.html");
+      // A directory resolves to its own index.html before the SPA fallback does.
+      // Without this, /dashboard/ fell through to the ROOT index.html and the
+      // desk's baselines were quietly compared against the landing page.
+      const dirIndex = path.join(p, "index.html");
+      const f = fs.existsSync(p) && fs.statSync(p).isFile()
+        ? p
+        : fs.existsSync(dirIndex)
+          ? dirIndex
+          : path.join(root, "index.html");
       if (!fs.existsSync(f)) return res.writeHead(404).end();
       res.writeHead(200, { "content-type": TYPES[path.extname(f)] ?? "application/octet-stream" });
       fs.createReadStream(f).pipe(res);
@@ -131,7 +139,18 @@ if (!live && !fs.existsSync(path.join(target, "index.html"))) {
   process.exit(2);
 }
 const { s, port } = live ? { s: { close() {} }, port: 0 } : await serve(target);
-const url = live ? target : `http://127.0.0.1:${port}/index.html`;
+// --path, for a bundle whose pages are not all at the root. The desk builds to
+// dist/ with the landing at / and itself at /dashboard/, and its assets are
+// absolute — so serving dist/dashboard as a root gives a blank white page and a
+// 100% diff on every viewport, which reads as "the design changed completely".
+//
+// Write it WITHOUT a leading slash — `--path=dashboard/`. Git Bash rewrites a
+// leading-slash argument into a Windows path before the script ever sees it,
+// and the failure is a navigation to "http://127.0.0.1:58100C:/Program
+// Files/Git/dashboard/".
+const pathArg = args.find((a) => a.startsWith("--path="));
+const subPath = pathArg ? "/" + pathArg.slice("--path=".length).replace(/^\/+/, "") : "/index.html";
+const url = live ? target : `http://127.0.0.1:${port}${subPath}`;
 
 const browser = await chromium.launch();
 const failures = [];

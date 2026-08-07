@@ -18,6 +18,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** The desk's FCC extension id, from the file buta's deploy writes. */
+const EXT_ID = (() => {
+  if (process.env.EXT_ID) return BigInt(process.env.EXT_ID);
+  const p = fileURLToPath(new URL("../../buta/config/extension.env", import.meta.url));
+  const line = fs.readFileSync(p, "utf8").split(/\r?\n/).find((l) => l.startsWith("EXTENSION_ID="));
+  if (!line) throw new Error(`EXTENSION_ID missing from ${p} — pass EXT_ID= instead`);
+  return BigInt(line.slice("EXTENSION_ID=".length).trim());
+})();
+
 // fileURLToPath, not .pathname — a URL percent-encodes the space in the repo
 // path, and the server then served a directory that does not exist. The page
 // came up empty and the run died on a 30s timeout rather than a failed check.
@@ -148,6 +157,51 @@ await page.waitForTimeout(600);
 const churned = (await page.locator("#rows").innerText()) + (await page.innerText("#state"));
 check("alternating reset and clear stays clean", !/NaN|undefined|Infinity/.test(churned), churned.slice(0, 80));
 check("and still shows five bids", (await page.locator("#rows > *").count()) === 5);
+
+// ---- the address the page publishes has to be the one that is bound ---------
+// The landing links a contract twice — the masthead and the scope list — and it
+// kept linking the FIRST deployment for two weeks after two more replaced it.
+// Nothing caught it: the DOM was unchanged, and a mono address is small enough
+// that the pixel baselines stayed inside tolerance. A judge clicking through to
+// the explorer would have landed on a contract with no auctions on it.
+{
+  const bound = await fetch("https://coston2-api.flare.network/ext/C/rpc", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "eth_call",
+      params: [{
+        to: "0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE",
+        data: "0x2c177358" + EXT_ID.toString(16).padStart(64, "0"), // getTeeExtensionInstructionsSender
+      }, "latest"],
+    }),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => (j?.result && j.result !== "0x" ? "0x" + j.result.slice(-40) : null))
+    .catch(() => null);
+
+  if (!bound) {
+    console.log("  skip  the diamond did not answer — cannot check the published address");
+  } else {
+    const links = await page.locator('a[href*="coston2-explorer.flare.network/address/"]').evaluateAll(
+      (as) => as.map((a) => (a.getAttribute("href").match(/address\/(0x[0-9a-fA-F]{40})/) || [])[1]).filter(Boolean),
+    );
+    check("the landing links a contract at all", links.length > 0);
+    const wrong = links.filter((a) => a.toLowerCase() !== bound.toLowerCase());
+    check(
+      "every contract the landing links is the one the diamond is bound to",
+      wrong.length === 0,
+      `diamond says ${bound}, page links ${[...new Set(wrong)].join(", ")}`,
+    );
+    const shown = await page.textContent("body");
+    const tail = bound.slice(-4).toLowerCase();
+    check(
+      "and the short form it prints ends in the same four characters",
+      new RegExp(`0x[0-9a-f]{4}…${tail}`, "i").test(shown.replace(/\s+/g, " ")),
+      `looking for …${tail}`,
+    );
+  }
+}
 
 // ---- wrong path: nothing may throw -----------------------------------------
 check("no uncaught page errors during any of it", pageErrors.length === 0, [...new Set(pageErrors)].join("; "));

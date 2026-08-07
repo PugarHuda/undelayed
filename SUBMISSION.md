@@ -89,12 +89,12 @@ depend on.
 | **Our own bot finalises a payment** | 7 XRP in (XRPL `6465EFFF817AFD17CB68A3C7B59D9942678E1650C308E4D058755BE7050AC07B`) → `0x595a419cde1614b7e912dacde0733b6be57d832fce1fea1f4595a26c5fd95e0f` splits it exactly as `_computeFees` says: **0.1 FXRP system fee, 6.8 to the merchant, 0.1 executor fee to us** |
 
 Contracts used (all Flare's own, resolved through the ContractRegistry at
-`0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019`):
+[`0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019`](https://coston2-explorer.flare.network/address/0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019)):
 
-- `AssetManagerFXRP` — Coston2 `0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA`, Flare `0x2a3Fe068cD92178554cabcf7c95ADf49B4B0B6A8`
-- `MintingTagManager` — Coston2 `0x094511737909b626391106bBc21B25feb2D67B96`
-- `FdcHub` `0x48aC463d7975828989331F4De43341627b9c5f1D`, `FdcVerification` `0x906507E0B64bcD494Db73bd0459d1C667e14B933`
-- `FtsoV2` `0xC4e9c78EA53db782E28f28Fdf80BaF59336B304d`, feed `XRP/USD`
+- `AssetManagerFXRP` — Coston2 [`0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA`](https://coston2-explorer.flare.network/address/0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA), Flare [`0x2a3Fe068cD92178554cabcf7c95ADf49B4B0B6A8`](https://flare-explorer.flare.network/address/0x2a3Fe068cD92178554cabcf7c95ADf49B4B0B6A8)
+- `MintingTagManager` — Coston2 [`0x094511737909b626391106bBc21B25feb2D67B96`](https://coston2-explorer.flare.network/address/0x094511737909b626391106bBc21B25feb2D67B96)
+- `FdcHub` [`0x48aC463d7975828989331F4De43341627b9c5f1D`](https://coston2-explorer.flare.network/address/0x48aC463d7975828989331F4De43341627b9c5f1D), `FdcVerification` [`0x906507E0B64bcD494Db73bd0459d1C667e14B933`](https://coston2-explorer.flare.network/address/0x906507E0B64bcD494Db73bd0459d1C667e14B933)
+- `FtsoV2` [`0xC4e9c78EA53db782E28f28Fdf80BaF59336B304d`](https://coston2-explorer.flare.network/address/0xC4e9c78EA53db782E28f28Fdf80BaF59336B304d), feed `XRP/USD`
 
 ---
 

@@ -3,8 +3,12 @@
  *
  *   node qa/hostile-operator.mjs [deskUrl]
  *
- * Needs a desk pointed at this script's server:
- *   cd buta/frontend && VITE_TEE_PROXY_URL=http://127.0.0.1:6699 npx vite --port 5175
+ * It starts the desk itself, pointed at this script's server. It used to require
+ * that by hand — a vite with one specific env var on one specific port — and
+ * without it every case navigated to nothing, saw an empty document, and
+ * reported "blank page". Ten hostile payloads, ten failures, none of them about
+ * the desk. A check whose default outcome is a false failure gets read as noise
+ * and then not read at all, which is worse than not having it.
  *
  * The submission's whole claim is that the party relaying for the enclave is
  * not trusted. The desk trusted it completely — it called .toLocaleString() on
@@ -15,6 +19,9 @@
  */
 import http from "node:http";
 import crypto from "node:crypto";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { decrypt } from "../../buta/frontend/node_modules/ecies-geth/dist/lib/src/typescript/node.js";
 import { chromium } from "playwright";
 import { installWallet, connect } from "./wallet.mjs";
@@ -91,6 +98,36 @@ await new Promise((r) => srv.listen(6699, "127.0.0.1", r));
 
 const failures = [];
 let checks = 0;
+
+// The desk, served against the liar above. VITE_TEE_PROXY_URL points straight
+// at it rather than going through vite's proxy, because the point here is a
+// browser talking to a hostile origin — CORS headers included, which the server
+// above sends and the real extension proxy does not.
+const PORT = Number(process.env.DESK_PORT ?? 5175);
+const deskUrl = process.argv[2] ?? `http://127.0.0.1:${PORT}/dashboard/`;
+let dev = null;
+if (!process.argv[2]) {
+  dev = spawn(process.platform === "win32" ? "npx.cmd" : "npx",
+    ["vite", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"], {
+      cwd: path.join(fileURLToPath(new URL("../../buta/", import.meta.url)), "frontend"),
+      stdio: "ignore",
+      shell: process.platform === "win32",
+      env: { ...process.env, VITE_TEE_PROXY_URL: "http://127.0.0.1:6699" },
+    });
+  const stop = () => { try { dev.kill(); } catch { /* already gone */ } };
+  process.on("exit", stop);
+  let up = false;
+  for (let i = 0; i < 40 && !up; i++) {
+    up = await fetch(deskUrl).then((r) => r.ok).catch(() => false);
+    if (!up) await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!up) {
+    console.log("  FAIL  the desk never came up — nothing below would mean anything");
+    stop();
+    process.exit(1);
+  }
+}
+
 const browser = await chromium.launch();
 for (const [name, data] of Object.entries(CASES)) {
   payload = data;
@@ -100,7 +137,7 @@ for (const [name, data] of Object.entries(CASES)) {
   p.on("pageerror", (e) => errs.push(String(e).split("\n")[0].slice(0, 90)));
   let alerted = false;
   p.on("dialog", async (d) => { alerted = true; await d.dismiss(); });
-  await p.goto(process.argv[2] ?? "http://localhost:5175/dashboard/", { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
+  await p.goto(deskUrl, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
   await p.waitForTimeout(4500);
   const t = await p.evaluate(() => (document.body.innerText || "").replace(/\s+/g, " "));
   const bad = /NaN|undefined|Infinity|\[object/i.test(t);
@@ -126,7 +163,7 @@ for (const [name, data] of Object.entries(BID_CASES)) {
   const p = await ctx.newPage();
   const errs = [];
   p.on("pageerror", (e) => errs.push(String(e).split("\n")[0].slice(0, 90)));
-  await p.goto(process.argv[2] ?? "http://localhost:5175/dashboard/", { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
+  await p.goto(deskUrl, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
   await p.waitForTimeout(4000);
   await connect(p, w);
   const folio = p.locator("button", { hasText: /^▸? ?portfolio$/i }).first();
@@ -170,7 +207,7 @@ for (const [name, data] of Object.entries(BID_CASES)) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
   const w = await installWallet(ctx);
   const p = await ctx.newPage();
-  await p.goto(process.argv[2] ?? "http://localhost:5175/dashboard/", { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
+  await p.goto(deskUrl, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
   await p.waitForTimeout(4000);
   await connect(p, w);
   await p.waitForTimeout(1500);

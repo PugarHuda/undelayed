@@ -24,8 +24,13 @@ const CHAIN_ID = 114;
  * Installs the wallet on a Playwright context. Call before the first goto —
  * the page reads window.ethereum on load.
  */
-export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC, privateKey, broadcast = false } = {}) {
+// `log`, when given an array, records what the page ASKED for rather than what
+// it got. A refusal the desk swallows looks identical to a button that correctly
+// never fired — both end with no transaction — and telling those apart is the
+// whole point of some checks.
+export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC, privateKey, broadcast = false, log } = {}) {
   const account = privateKeyToAccount(privateKey ?? TEST_KEY);
+  const asked = log ?? [];
 
   // Opt-in, and only ever from a one-off driver — never from a suite. A check
   // that spends real gas is a check nobody runs twice, which is the same as no
@@ -37,6 +42,7 @@ export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC, privat
     : null;
 
   await ctx.exposeFunction("__wallet", async (method, params = []) => {
+    asked.push(method);
     switch (method) {
       case "eth_accounts":
       case "eth_requestAccounts":
@@ -106,6 +112,10 @@ export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC, privat
 
   return account.address;
 }
+
+/** Did the page ask to sign or broadcast anything? */
+export const signingRequests = (log) =>
+  log.filter((m) => m === "eth_sendTransaction" || m === "personal_sign" || m === "eth_signTypedData_v4");
 
 /**
  * Clicks through RainbowKit's modal. Returns true once the page shows the

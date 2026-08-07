@@ -54,9 +54,24 @@ test("every source module the README lists actually exists", () => {
   }
 });
 
-test("the submission does not claim an address the deployment file disagrees with", () => {
+test("every address the submission cites is one a reader can go and check", () => {
   const sub = read("SUBMISSION.md");
-  // The one address a reader will paste into an explorer.
-  assert.match(sub, /0x20d9CcAA7140bf38AD91D2F102bA996417798e8f|undelayed/i);
   assert.ok(!/TODO|TBD|<fill|xxx/i.test(sub), "the submission still has a placeholder in it");
+
+  // This used to assert `/0x20d9…|undelayed/` against a document with the word
+  // "undelayed" all over it, so the address half could never fail — a check that
+  // reads as address verification and is not one. Whether the addresses are the
+  // LIVE ones is a question for the chain, and `npm run verify:submission` asks
+  // it. What can be settled offline is that none of them is stated bare: an
+  // address with no explorer link behind it is a claim a judge has to take on
+  // trust, which is the one thing this submission is not asking anyone to do.
+  const linked = new Set(
+    [...sub.matchAll(/explorer\.flare\.network\/(?:address|tx)\/(0x[0-9a-fA-F]{40})/g)].map((m) =>
+      m[1].toLowerCase(),
+    ),
+  );
+  const bare = [...sub.matchAll(/`(0x[0-9a-fA-F]{40})`/g)]
+    .map((m) => m[1])
+    .filter((a) => !linked.has(a.toLowerCase()));
+  assert.deepEqual(bare, [], `addresses cited with no explorer link: ${bare.join(", ")}`);
 });

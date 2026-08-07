@@ -31,7 +31,7 @@ try {
   process.exit(2);
 }
 const { chromium } = playwright;
-const { installWallet, connect } = await import("./wallet.mjs");
+const { installWallet, connect, signingRequests } = await import("./wallet.mjs");
 
 // The desk's FCC extension id, read from the file buta's deploy writes rather
 // than pinned here. Pinned, it survived a redeploy and turned into a check that
@@ -55,7 +55,8 @@ const check = (name, ok, detail = "") => {
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
-const wallet = await installWallet(ctx);
+const walletLog = [];
+const wallet = await installWallet(ctx, { log: walletLog });
 const page = await ctx.newPage();
 
 const pageErrors = [];
@@ -65,7 +66,9 @@ page.on("request", (r) => requests.push(r.url()));
 // Responses too: whether an enclave answered is the only honest way to know if
 // this desk is live, and the page saying so is not evidence of it.
 const replies = [];
-page.on("response", (r) => replies.push({ url: r.url(), ok: r.ok() }));
+page.on("response", (r) =>
+  replies.push({ url: r.url(), ok: r.ok(), type: r.headers()["content-type"] ?? "" }),
+);
 
 await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
 await page.waitForTimeout(5000);
@@ -76,7 +79,12 @@ const body = (await page.textContent("body")) ?? "";
 // actually answered, not by whether the page says so. Reading it off the banner
 // made the banner check a tautology: the desk was asked to admit it was on demo
 // data, and the evidence for the question was the admission itself.
-const liveBackend = replies.some((r) => /\/direct$/.test(r.url) && r.ok);
+// ok is not enough: a static server with an SPA fallback answers /direct with
+// 200 and the index page, so "an enclave replied" came out true against a
+// directory of files. It has to have replied as an enclave would — JSON.
+const liveBackend = replies.some(
+  (r) => /\/direct$/.test(r.url) && r.ok && /json/i.test(r.type),
+);
 const onDemo = !liveBackend;
 
 // Now it can be checked in both directions. A desk with no enclave must say the
@@ -548,6 +556,57 @@ check(
   (await page.locator("button", { hasText: /FXRP\// }).count()) > 0,
   "no rows after going back to Book / All",
 );
+
+// ---- wrong path: a demo row is not a row on the contract --------------------
+//
+// The most expensive bug this desk has had. Every row-scoped on-chain button
+// took the row's id straight into a transaction, and when no enclave answers
+// those ids come from demoBook(). A run with the proxy rejecting /direct showed
+// demo row 5, "Request clearing on-chain" was pressed, and a real paid
+// instruction went out about contract RFQ 5 — somebody else's auction. Nothing
+// looked wrong: the banner was up, the button worked, the transaction succeeded.
+//
+// So the guard is checked from the outside, the only way it counts: press the
+// button on a demo book and assert the wallet was never asked to sign anything.
+// The desk refusing in its own words is not enough — the desk saying "no" while
+// still sending is exactly the failure.
+if (connected && onDemo) {
+  // A SEALED row, not the first one: the first is usually CLEARED, and a closed
+  // auction offers none of the buttons this is trying to press.
+  const row = page
+    .locator("button", { hasText: /FXRP\// })
+    .filter({ hasText: /SEALED/i })
+    .filter({ hasNotText: /BID SEALED/i })
+    .first();
+  if (await row.count()) {
+    await row.click().catch(() => {});
+    await page.waitForTimeout(800);
+  }
+  let pressed = 0;
+  const before = signingRequests(walletLog).length;
+  for (const label of [/request clearing on-chain/i, /settle on-chain/i, /seal on-chain instead/i]) {
+    const b = page.locator("button", { hasText: label }).first();
+    if (!(await b.count())) continue;
+    pressed++;
+    await b.click().catch(() => {});
+    await page.waitForTimeout(1200);
+  }
+  const after = signingRequests(walletLog).length;
+  const said = (await page.textContent("body")) ?? "";
+
+  check("wrong path: the desk offers on-chain actions on the demo book at all", pressed > 0,
+    "no on-chain button was reachable, so the guard was never exercised");
+  check(
+    "wrong path: pressing an on-chain button on a demo row asks the wallet for nothing",
+    after === before,
+    `${after - before} signing request(s) from ${pressed} press(es)`,
+  );
+  check(
+    "wrong path: and the desk says why, rather than failing silently",
+    /not on the contract|demo book/i.test(said),
+    "no explanation after pressing",
+  );
+}
 
 if (connected) {
   // A cleared auction is closed to bids, and the first row usually is one — the
