@@ -54,12 +54,14 @@ for (const hash of hashes) {
 }
 
 // ---- Flare's own addresses, per the registry rather than per the document ----
+// `\[?` on each: the addresses are markdown links now, and anchoring on the
+// bare code span made "the line is gone" the report for a formatting change.
 const named = {
-  AssetManagerFXRP: /`AssetManagerFXRP` — Coston2 `(0x[0-9a-fA-F]{40})`/,
-  MintingTagManager: /`MintingTagManager` — Coston2 `(0x[0-9a-fA-F]{40})`/,
-  FdcHub: /`FdcHub` `(0x[0-9a-fA-F]{40})`/,
-  FdcVerification: /`FdcVerification` `(0x[0-9a-fA-F]{40})`/,
-  FtsoV2: /`FtsoV2` `(0x[0-9a-fA-F]{40})`/,
+  AssetManagerFXRP: /`AssetManagerFXRP` — Coston2 \[?`(0x[0-9a-fA-F]{40})`/,
+  MintingTagManager: /`MintingTagManager` — Coston2 \[?`(0x[0-9a-fA-F]{40})`/,
+  FdcHub: /`FdcHub` \[?`(0x[0-9a-fA-F]{40})`/,
+  FdcVerification: /`FdcVerification` \[?`(0x[0-9a-fA-F]{40})`/,
+  FtsoV2: /`FtsoV2` \[?`(0x[0-9a-fA-F]{40})`/,
 };
 
 for (const [name, re] of Object.entries(named)) {
