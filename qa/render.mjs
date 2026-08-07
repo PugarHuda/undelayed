@@ -21,7 +21,12 @@ import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const pageDir = args.find((a) => !a.startsWith("--")) ?? fileURLToPath(new URL("../dashboard", import.meta.url));
-const shotDir = args.includes("--shots") ? args[args.indexOf("--shots") + 1] : "qa/shots";
+// Resolved from this file, not from the cwd: run from inside qa/ and a
+// cwd-relative default writes qa/qa/shots, which .gitignore (anchored at the
+// repo root) does not cover, so throwaway screenshots turn up as untracked.
+const shotDir = args.includes("--shots")
+  ? args[args.indexOf("--shots") + 1]
+  : fileURLToPath(new URL("./shots", import.meta.url));
 
 let playwright;
 try {

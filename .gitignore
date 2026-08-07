@@ -33,3 +33,5 @@ qa/baseline/*.actual.png
 
 # published executor record: regenerate with `npm run bot -- --publish`
 executor-record.*.json
+
+.vercel
