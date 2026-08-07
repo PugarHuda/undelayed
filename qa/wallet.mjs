@@ -12,6 +12,8 @@
  * runs twice.
  */
 import { privateKeyToAccount } from "viem/accounts";
+import { createWalletClient, http } from "viem";
+import { flareTestnet } from "viem/chains";
 
 /** A published test key. It holds nothing, and it must stay that way. */
 const TEST_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -22,8 +24,17 @@ const CHAIN_ID = 114;
  * Installs the wallet on a Playwright context. Call before the first goto —
  * the page reads window.ethereum on load.
  */
-export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC } = {}) {
-  const account = privateKeyToAccount(TEST_KEY);
+export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC, privateKey, broadcast = false } = {}) {
+  const account = privateKeyToAccount(privateKey ?? TEST_KEY);
+
+  // Opt-in, and only ever from a one-off driver — never from a suite. A check
+  // that spends real gas is a check nobody runs twice, which is the same as no
+  // check at all. scripts/settle-from-browser.mjs turns this on deliberately
+  // because the thing it proves cannot be proved any other way: that the DESK
+  // can settle, not just the script that shares its libraries.
+  const sender = broadcast
+    ? createWalletClient({ account, chain: { ...flareTestnet, id: chainId }, transport: http(rpc) })
+    : null;
 
   await ctx.exposeFunction("__wallet", async (method, params = []) => {
     switch (method) {
@@ -42,9 +53,15 @@ export async function installWallet(ctx, { chainId = CHAIN_ID, rpc = RPC } = {})
       case "wallet_switchEthereumChain":
       case "wallet_addEthereumChain":
         return null;
-      case "eth_sendTransaction":
+      case "eth_sendTransaction": {
         // Deliberate. See the note at the top of the file.
-        throw new Error("test wallet does not broadcast");
+        if (!sender) throw new Error("test wallet does not broadcast");
+        const t = params[0] ?? {};
+        const big = (v) => (v === undefined || v === null ? undefined : BigInt(v));
+        return sender.sendTransaction({
+          to: t.to, data: t.data, value: big(t.value), gas: big(t.gas),
+        });
+      }
       default: {
         const r = await fetch(rpc, {
           method: "POST",
