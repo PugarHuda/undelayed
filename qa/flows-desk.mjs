@@ -20,6 +20,9 @@
  * from it. Which branch applies is decided by whether an enclave answered, not
  * by what the page says about itself.
  */
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
 let playwright;
 try {
   playwright = await import("playwright");
@@ -29,6 +32,17 @@ try {
 }
 const { chromium } = playwright;
 const { installWallet, connect } = await import("./wallet.mjs");
+
+// The desk's FCC extension id, read from the file buta's deploy writes rather
+// than pinned here. Pinned, it survived a redeploy and turned into a check that
+// compared the live page against a retired extension and called the page wrong.
+const EXT_ID = (() => {
+  if (process.env.EXT_ID) return BigInt(process.env.EXT_ID);
+  const path = fileURLToPath(new URL("../../buta/config/extension.env", import.meta.url));
+  const line = fs.readFileSync(path, "utf8").split(/\r?\n/).find((l) => l.startsWith("EXTENSION_ID="));
+  if (!line) throw new Error(`EXTENSION_ID missing from ${path} — pass EXT_ID= instead`);
+  return BigInt(line.slice("EXTENSION_ID=".length).trim());
+})();
 
 const url = process.argv[2] ?? "https://buta-desk.vercel.app/dashboard";
 
@@ -248,10 +262,10 @@ if (await activityTab.count()) {
           jsonrpc: "2.0", id: 1, method: "eth_call",
           params: [{
             to: "0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE",
-            // getTeeExtensionInstructionsSender(uint256), extension 65642.
-            // Computed with toFunctionSelector, not guessed — a guessed one
+            // getTeeExtensionInstructionsSender(uint256). The selector was
+            // computed with toFunctionSelector, not guessed — a guessed one
             // returns 0x and this check would pass on nothing.
-            data: "0x2c177358" + (65642).toString(16).padStart(64, "0"),
+            data: "0x2c177358" + EXT_ID.toString(16).padStart(64, "0"),
           }, "latest"],
         }),
       }).catch(() => null);
