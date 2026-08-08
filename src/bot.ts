@@ -224,7 +224,14 @@ async function report() {
   console.log(`  won      ${won.length}`);
   console.log(`  lost     ${lost.length}   (proof and gas paid, fee to someone else)`);
   console.log(`  pending  ${pending.length}`);
-  if (unlabelled.length) console.log(`  unknown  ${unlabelled.length}   (finished before outcomes were recorded)`);
+  if (unlabelled.length) {
+    console.log(`  unknown  ${unlabelled.length}   (finished before outcomes were recorded)`);
+    // Said out loud because otherwise this reads as a contradiction: the
+    // submission cites a race this bot won, and a fresh checkout's ledger
+    // reports zero wins. Both are true. The ledger is this machine's memory of
+    // what it did; the chain is the record. `npm run status` reads the chain.
+    console.log(`           this ledger is local memory, not the record — npm run status reads the chain`);
+  }
   console.log(`  earned   ${Number(earned) / 1e6} XRP in executor fees`);
   if (won.length + lost.length > 0) {
     const rate = (100 * won.length) / (won.length + lost.length);

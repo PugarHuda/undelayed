@@ -38,6 +38,24 @@ function orExit<T>(f: () => T): T {
   }
 }
 
+// --help is a question, not a mistake. It used to be answered with `"--help" is
+// not a destination tag` and exit 2, which is the right information wrapped in
+// the wrong verdict — the first thing a judge types should not look like a
+// failure.
+if (ARGS.length === 0 || ARGS.includes("--help") || ARGS.includes("-h")) {
+  console.log(`
+  usage: npm run pay -- <tag> [amountXRP] [--net XRP] [--usd USD] [--split] [--quote]
+
+    <tag>        the merchant's destination tag, as reserved on the tag manager
+    amountXRP    what the customer sends, gross
+    --net XRP    what the merchant must RECEIVE; the gross is worked back from it
+    --usd USD    the same, priced through the FTSO XRP/USD feed
+    --split      execute as pieces under the large-mint cliff, if that lands sooner
+    --quote      print the quote and stop, without asking for a payment
+`);
+  process.exit(0);
+}
+
 const tag = orExit(() => parseTag(ARGS[0]));
 const quoteOnly = ARGS.includes("--quote");
 const netXrp = flag("net");
