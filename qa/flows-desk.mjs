@@ -842,8 +842,29 @@ check(
     // The reserve too. Without it the desk stops at "set a reserve above zero"
     // — which is correct, and which meant this check never reached the
     // pre-flight it was written to test.
+    // A lot this wallet cannot cover, whatever it happens to hold. The lot was
+    // pinned at 5 FXRP and the wallet was empty, until today's settlements paid
+    // it 5.1 — so the desk correctly stopped saying "you cannot post this" and
+    // the check reported a missing pre-flight. A wrong-path check that depends
+    // on a balance nobody controls is a check with an expiry date on it.
+    const held = await fetch("https://coston2-api.flare.network/ext/C/rpc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "eth_call",
+        params: [{
+          to: "0x0b6A3645c240605887a5532109323A3E12273dc7", // FXRP
+          data: "0x70a08231" + wallet.slice(2).toLowerCase().padStart(64, "0"), // balanceOf
+        }, "latest"],
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => (j?.result ? BigInt(j.result) : 0n))
+      .catch(() => 0n);
+    const unaffordable = (held + 1_000_000n).toString(); // one whole FXRP past it
+
     for (const [label, value] of [
-      ["Lot (base units)", "5000000"],
+      ["Lot (base units)", unaffordable],
       ["Hidden reserve (quote units)", "1000000"],
       ["Open for (minutes)", "10"],
     ]) {
