@@ -306,6 +306,23 @@ if (await clearedRow.count()) {
   // Vickrey pays it — and the row has to say what stayed sealed, or the reader
   // has no way to tell a private auction from a merely quiet one.
   check("a cleared auction opens its receipt", /clearing price/i.test(onCleared), onCleared.slice(0, 80));
+
+  // The affordances have to agree with the state of the auction, not just the
+  // words. A cleared auction cannot be bid on and cannot be cleared again —
+  // relayClearing reverts AlreadyCleared, commitBid reverts AlreadyCleared —
+  // so offering either is offering a transaction that can only fail, paid for.
+  // This is the cheap half of the demo-row lesson: a button that should not be
+  // there is as expensive as a guard that does not fire.
+  for (const [what, re] of [
+    ["seal a bid on", /seal on-chain instead/i],
+    ["request another clearing for", /request clearing on-chain/i],
+  ]) {
+    check(
+      `wrong path: a cleared auction does not offer to ${what} itself`,
+      !re.test(onCleared),
+      `the control is still on screen for an auction that has already cleared`,
+    );
+  }
   check("the receipt names the second price as the rule", /vickrey second price/i.test(onCleared));
   check("and says what stayed sealed", /sealed forever/i.test(onCleared));
   // "3 bids" is a number you take on trust. The commitments are public by
